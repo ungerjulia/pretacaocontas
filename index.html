@@ -775,8 +775,11 @@ function openLightbox(src) { document.getElementById('lightboxImg').src=src; doc
 // EXPENSE DETAIL MODAL
 // ═══════════════════════════════════════════
 async function openExpenseDetail(id) {
-  const exp = allExpenses.find(e => e.id === id) || await fbGet('expenses', id);
-  if (!exp) return;
+  let exp = allExpenses.find(e => e.id === id);
+  if (!exp) {
+    try { exp = await fbGet('expenses', id); } catch(e) {}
+  }
+  if (!exp) { toast('Prestação não encontrada.', true); return; }
   const isAdmin = state.currentUser.role === 'admin';
   const color = BIZ_COLORS[exp.businessLine]||'var(--white)';
 
@@ -941,10 +944,10 @@ function renderExpensesTab() {
   document.getElementById('tabContent').innerHTML = `
     <div class="card">
       <div class="card-title" style="justify-content:space-between;">
-        <div style="display:flex;align-items:center;gap:10px;cursor:pointer;" onclick="openFullListPage()">
+        <div style="display:flex;align-items:center;gap:10px;">
           <div class="dot"></div>
-          <span style="border-bottom:1px solid rgba(200,168,75,0.3);">Todas as Prestações</span>
-          <span style="font-size:11px;color:var(--accent);font-family:'DM Sans',sans-serif;font-weight:400;letter-spacing:0;">↗ Tela cheia</span>
+          <span>Todas as Prestações</span>
+          <span style="font-size:11px;color:var(--accent);font-family:'DM Sans',sans-serif;font-weight:400;letter-spacing:0;cursor:pointer;text-decoration:underline;" onclick="window.open(window.location.href,'_blank')">↗ Nova aba</span>
         </div>
         <span style="font-size:11px;color:var(--text-dim);font-family:'DM Sans',sans-serif;font-weight:400;letter-spacing:0;">Clique em qualquer linha para detalhes</span>
       </div>
@@ -1007,7 +1010,7 @@ function filterTable() {
     const initials = e.userName.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase();
     const cats = e.lines ? [...new Set(e.lines.map(l=>l.category))].map(c=>`<span class="cat-badge" style="margin-right:3px;">${c}</span>`).join('') : `<span class="cat-badge">${e.category}</span>`;
     const amounts = e.lines ? e.lines.map(l=>`${CURR_SYMBOL[l.currency]} ${Number(l.amount).toLocaleString('pt-BR',{minimumFractionDigits:2})}`).join('<br>') : `${CURR_SYMBOL[e.currency]} ${Number(e.amount).toLocaleString('pt-BR',{minimumFractionDigits:2})}`;
-    return `<tr class="clickable" onclick="openExpenseDetail('${e.id}')" style="cursor:pointer;">
+    return `<tr class="clickable" data-expid="${e.id}" style="cursor:pointer;">
       <td><div style="display:flex;align-items:center;gap:8px;"><div class="trader-avatar">${initials}</div>${e.userName}</div></td>
       <td><span style="font-size:10px;letter-spacing:1px;text-transform:uppercase;color:${color};">${e.businessLine||'—'}</span></td>
       <td><strong>${e.event}</strong><br><small style="color:var(--text-dim)">${e.description||''}</small></td>
@@ -1027,6 +1030,17 @@ function filterTable() {
       </td>
     </tr>`;
   }).join('');
+
+  // Event delegation for row clicks
+  tbody.removeEventListener('click', handleTableClick);
+  tbody.addEventListener('click', handleTableClick);
+}
+
+function handleTableClick(e) {
+  const btn = e.target.closest('button');
+  if (btn) return; // ignore button clicks
+  const tr = e.target.closest('tr[data-expid]');
+  if (tr) openExpenseDetail(tr.dataset.expid);
 }
 
 async function changeStatus(id, status) {
@@ -1441,7 +1455,7 @@ function filterFullTable() {
     const initials = e.userName.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase();
     const cats = e.lines ? [...new Set(e.lines.map(l=>l.category))].map(c=>`<span class="cat-badge" style="margin-right:3px;">${c}</span>`).join('') : `<span class="cat-badge">${e.category}</span>`;
     const amounts = e.lines ? e.lines.map(l=>`${CURR_SYMBOL[l.currency]} ${Number(l.amount).toLocaleString('pt-BR',{minimumFractionDigits:2})}`).join('<br>') : `${CURR_SYMBOL[e.currency]} ${Number(e.amount).toLocaleString('pt-BR',{minimumFractionDigits:2})}`;
-    return `<tr class="clickable" onclick="openExpenseDetail('${e.id}')" style="cursor:pointer;">
+    return `<tr class="clickable" data-expid="${e.id}" style="cursor:pointer;">
       <td><div style="display:flex;align-items:center;gap:8px;"><div class="trader-avatar">${initials}</div>${e.userName}</div></td>
       <td><span style="font-size:10px;letter-spacing:1px;text-transform:uppercase;color:${color};">${e.businessLine||'—'}</span></td>
       <td><strong>${e.event}</strong><br><small style="color:var(--text-dim)">${e.description||''}</small></td>
@@ -1461,6 +1475,13 @@ function filterFullTable() {
       </td>
     </tr>`;
   }).join('');
+
+  // Event delegation for row clicks
+  const ftbody = document.getElementById('fullExpTableBody');
+  if (ftbody) {
+    ftbody.removeEventListener('click', handleTableClick);
+    ftbody.addEventListener('click', handleTableClick);
+  }
 }
 
 function exportExcelFull() {
