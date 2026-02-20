@@ -763,7 +763,7 @@ function renderAdminHTML(expenses) {
     ${renderBizLineStats(approved)}
     <div class="tabs">
       <button class="tab ${adminTab==='expenses'?'active':''}" onclick="switchTab('expenses',event)">Prestações</button>
-      <button class="tab ${adminTab==='users'?'active':''}" onclick="switchTab('users',event)">Traders</button>
+      <button class="tab ${adminTab==='users'?'active':''}" onclick="switchTab('users',event)">Usuários</button>
       <button class="tab ${adminTab==='categories'?'active':''}" onclick="switchTab('categories',event)">Categorias</button>
     </div>
     <div id="tabContent"></div>`;
@@ -901,10 +901,45 @@ async function changeStatus(id, status) {
     await fbUpdate('expenses', id, { status });
     const idx = allExpenses.findIndex(e => e.id === id);
     if (idx >= 0) allExpenses[idx].status = status;
-    toast(status==='approved' ? 'Prestação aprovada! ✓' : 'Prestação recusada.');
+
+    // Send email notification to trader if rejected
+    if (status === 'rejected') {
+      const exp = allExpenses[idx];
+      await sendStatusEmail(exp, 'rejected');
+    }
+
+    toast(status==='approved' ? 'Prestação aprovada! ✓' : 'Prestação recusada. Trader notificado por email.');
     filterTable();
     renderAdminHTML(allExpenses);
   } catch(e) { toast('Erro ao atualizar.', true); }
+}
+
+async function sendStatusEmail(exp, status) {
+  try {
+    // Get trader email
+    const users = await fbGetAll('users');
+    const trader = users.find(u => u.id === exp.userId);
+    if (!trader || !trader.email) return;
+
+    const linesText = exp.lines ? exp.lines.map((l,i) =>
+      `Linha ${i+1}: ${l.category} | ${CURR_SYMBOL[l.currency]} ${Number(l.amount).toLocaleString('pt-BR',{minimumFractionDigits:2})} | ${l.description||'—'}`
+    ).join('\n') : `${exp.category} | ${CURR_SYMBOL[exp.currency]} ${Number(exp.amount).toLocaleString('pt-BR',{minimumFractionDigits:2})}`;
+
+    await emailjs.send('service_7ojw3be', 'template_5r3es1d', {
+      trader_name: exp.userName,
+      business_line: exp.businessLine||'—',
+      event: exp.event,
+      category: exp.lines ? exp.lines.map(l=>l.category).join(', ') : (exp.category||''),
+      date: new Date(exp.date+'T12:00:00').toLocaleDateString('pt-BR'),
+      amount: exp.lines ? exp.lines.map(l=>`${CURR_SYMBOL[l.currency]} ${Number(l.amount).toLocaleString('pt-BR',{minimumFractionDigits:2})}`).join(' | ') : `${CURR_SYMBOL[exp.currency]} ${Number(exp.amount).toLocaleString('pt-BR',{minimumFractionDigits:2})}`,
+      description: exp.description||'—',
+      created_at: new Date(exp.createdAt).toLocaleString('pt-BR'),
+      image_count: exp.images ? exp.images.length : 0,
+      name: exp.userName,
+      title: `Prestação RECUSADA: ${exp.event}`,
+      message: `Olá ${exp.userName},\n\nSua prestação de contas foi RECUSADA pelo financeiro.\n\nEvento: ${exp.event}\nLinha de Negócio: ${exp.businessLine}\nData: ${new Date(exp.date+'T12:00:00').toLocaleDateString('pt-BR')}\n\n${linesText}\n\nEm caso de dúvidas, entre em contato com o financeiro.\n\nIndependent Brazil`
+    });
+  } catch(e) { console.warn('Email notify error:', e); }
 }
 
 async function deleteExpense(id) {
@@ -926,30 +961,35 @@ function renderCategoriesTab() {
   document.getElementById('tabContent').innerHTML = `
     <div class="card">
       <div class="card-title"><div class="dot"></div> Gerenciar Categorias</div>
-      <p style="font-size:13px;color:var(--text-dim);margin-bottom:20px;">As categorias cadastradas aqui ficam disponíveis para os traders na hora de lançar uma prestação.</p>
+      <p style="font-size:13px;color:var(--text-dim);margin-bottom:20px;">As categorias cadastradas aqui ficam disponíveis para os usuários na hora de lançar uma prestação.</p>
       <div class="cat-list" id="catList">${globalCategories.map((c,i)=>`
         <div class="cat-tag">
           <span>${c}</span>
           <button onclick="removeCategory(${i})" title="Remover">✕</button>
         </div>`).join('')}
       </div>
-      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-top:16px;">
         <div class="field" style="margin-bottom:0;flex:1;min-width:200px;">
           <label>Nova Categoria</label>
-          <input type="text" id="newCatInput" placeholder="Ex: Hospedagem" onkeydown="if(event.key==='Enter')addCategory()">
+          <input type="text" id="newCatInput" placeholder="Ex: Hospedagem">
         </div>
-        <button class="btn btn-gold" onclick="addCategory()">+ Adicionar</button>
+        <button class="btn btn-gold" id="addCatBtn" style="margin-top:20px;">+ Adicionar</button>
       </div>
     </div>`;
+  // Attach events after DOM is rendered
+  document.getElementById('addCatBtn').addEventListener('click', addCategory);
+  document.getElementById('newCatInput').addEventListener('keydown', e => { if(e.key==='Enter') addCategory(); });
 }
 
 async function addCategory() {
-  const val = document.getElementById('newCatInput')?.value.trim();
-  if (!val) return;
-  if (globalCategories.includes(val)) { toast('Categoria já existe.', true); return; }
+  const input = document.getElementById('newCatInput');
+  if (!input) return;
+  const val = input.value.trim();
+  if (!val) { toast('Digite o nome da categoria.', true); return; }
+  if (globalCategories.map(c=>c.toLowerCase()).includes(val.toLowerCase())) { toast('Categoria já existe.', true); return; }
   globalCategories.push(val);
   await saveCategories();
-  toast('Categoria adicionada!');
+  toast('Categoria adicionada! ✓');
   renderCategoriesTab();
 }
 
@@ -971,8 +1011,8 @@ async function renderUsersTab() {
     const traders = all.filter(u => u.role === 'trader');
     document.getElementById('tabContent').innerHTML = `
       <div class="card">
-        <div class="card-title"><div class="dot"></div> Traders Cadastrados</div>
-        <div style="margin-bottom:24px;"><button class="btn btn-gold" onclick="openNewUserModal()">+ Novo Trader</button></div>
+        <div class="card-title"><div class="dot"></div> Usuários Cadastrados</div>
+        <div style="margin-bottom:24px;"><button class="btn btn-gold" onclick="openNewUserModal()">+ Novo Usuário</button></div>
         ${traders.length===0 ? `<div class="empty-state"><div class="big">0</div><p>Nenhum trader ainda.</p></div>` : `
         <div class="users-grid">${traders.map(u=>`
           <div class="user-card">
@@ -991,7 +1031,7 @@ async function renderUsersTab() {
 
 function openNewUserModal() {
   document.getElementById('modalBox').classList.remove('modal-wide');
-  document.getElementById('modalTitle').textContent = 'Cadastrar Novo Trader';
+  document.getElementById('modalTitle').textContent = 'Cadastrar Novo Usuário';
   document.getElementById('modalBody').innerHTML = `
     <div class="field"><label>Nome Completo *</label><input type="text" id="newName" placeholder="João Silva"></div>
     <div class="field"><label>E-mail *</label><input type="email" id="newEmail" placeholder="joao@independentbrazil.com"></div>
@@ -1023,7 +1063,7 @@ async function createUser() {
     const id = 'u'+Date.now();
     await fbSet('users', id, { id, name, email, password:pass, role:'trader', businessLine:bizLine, createdAt:new Date().toISOString() });
     closeModal();
-    toast('Trader cadastrado! ✓');
+    toast('Usuário cadastrado! ✓');
     renderUsersTab();
   } catch(e) { toast('Erro ao cadastrar.', true); }
 }
@@ -1032,7 +1072,7 @@ async function deleteUser(id) {
   if (!confirm('Remover este trader?')) return;
   try {
     await fbDelete('users', id);
-    toast('Trader removido.');
+    toast('Usuário removido.');
     renderUsersTab();
   } catch(e) { toast('Erro ao remover.', true); }
 }
@@ -1053,12 +1093,18 @@ function openReportModal() {
   document.getElementById('modalBody').innerHTML = `
     <p style="font-size:13px;color:var(--text-dim);margin-bottom:20px;">Filtre por período e linha de negócio para gerar o relatório.</p>
     <div class="form-grid">
-      <div class="field"><label>Data Início</label><input type="date" id="reportStart" value="${firstDay}"></div>
-      <div class="field"><label>Data Fim</label><input type="date" id="reportEnd" value="${today}"></div>
+      <div class="field">
+        <label>Data Início</label>
+        <input type="date" id="reportStart" style="color-scheme:dark;">
+      </div>
+      <div class="field">
+        <label>Data Fim</label>
+        <input type="date" id="reportEnd" style="color-scheme:dark;">
+      </div>
       <div class="field full"><label>Linha de Negócio</label>
         <select id="reportBiz">
           <option value="">Todas as linhas</option>
-          ${BIZ_LINES.map(l=>`<option>${l}</option>`).join('')}
+          ${BIZ_LINES.map(l=>"<option>"+l+"</option>").join("")}
         </select>
       </div>
       <div class="field full"><label>Status</label>
@@ -1071,9 +1117,14 @@ function openReportModal() {
       </div>
     </div>`;
   document.getElementById('modalActions').innerHTML = `
-    <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
-    <button class="btn btn-gold" onclick="generateReport()">📄 Gerar PDF</button>`;
+    <button class="btn btn-outline" id="reportCancelBtn">Cancelar</button>
+    <button class="btn btn-gold" id="reportGenBtn">📄 Gerar PDF</button>`;
   document.getElementById('modalOverlay').classList.add('open');
+  // Set values and attach events AFTER DOM render
+  document.getElementById('reportStart').value = firstDay;
+  document.getElementById('reportEnd').value = today;
+  document.getElementById('reportCancelBtn').addEventListener('click', closeModal);
+  document.getElementById('reportGenBtn').addEventListener('click', generateReport);
 }
 
 function generateReport() {
