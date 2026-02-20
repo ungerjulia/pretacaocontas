@@ -242,6 +242,49 @@
   .spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,0.2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;}
   @keyframes spin{to{transform:rotate(360deg)}}
 
+
+  /* DETAIL PAGE */
+  #detailPage {
+    display:none; position:fixed; inset:0;
+    background:var(--black); z-index:500;
+    overflow-y:auto; animation:fadeIn .2s ease;
+  }
+  @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+  .detail-page-header {
+    background:var(--gray); border-bottom:1px solid var(--border);
+    padding:0 24px; height:60px;
+    display:flex; align-items:center; justify-content:space-between;
+    position:sticky; top:0; z-index:10;
+  }
+  .detail-page-back {
+    display:flex; align-items:center; gap:10px;
+    cursor:pointer; color:var(--accent);
+    font-size:13px; font-weight:600; letter-spacing:1px;
+    text-transform:uppercase; background:none; border:none;
+  }
+  .detail-page-back:hover { color:var(--accent2); }
+  .detail-page-back svg { width:18px; height:18px; }
+  .detail-page-content { max-width:900px; margin:0 auto; padding:32px 24px; }
+  .detail-page-title { font-family:'Bebas Neue',sans-serif; font-size:32px; letter-spacing:2px; margin-bottom:4px; }
+  .detail-page-sub { font-size:13px; color:var(--text-dim); margin-bottom:28px; }
+  .detail-section { background:var(--gray); border:1px solid var(--border); padding:24px; margin-bottom:20px; }
+  .detail-section-title { font-family:'Bebas Neue',sans-serif; font-size:14px; letter-spacing:3px; color:var(--text-dim); margin-bottom:16px; padding-bottom:10px; border-bottom:1px solid var(--border); }
+  .detail-meta-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:16px; }
+  .detail-meta-item label { font-size:10px; letter-spacing:2px; text-transform:uppercase; color:var(--text-dim); display:block; margin-bottom:4px; }
+  .detail-meta-item span { font-size:14px; font-weight:500; }
+  .detail-line { background:var(--black); border:1px solid var(--border); padding:14px 18px; margin-bottom:8px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  .detail-line-num { font-family:'Bebas Neue',sans-serif; font-size:12px; letter-spacing:2px; color:var(--text-dim); min-width:50px; }
+  .detail-line-amount { font-family:'Bebas Neue',sans-serif; font-size:22px; color:var(--accent2); }
+  .detail-line-desc { font-size:12px; color:var(--text-dim); flex:1; }
+  .detail-images { display:flex; flex-wrap:wrap; gap:10px; }
+  .detail-img { width:100px; height:100px; object-fit:cover; border:1px solid var(--border); cursor:pointer; transition:all .2s; }
+  .detail-img:hover { border-color:var(--accent); transform:scale(1.03); }
+  .detail-actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:24px; }
+  @media(max-width:600px) {
+    .detail-page-content { padding:20px 14px; }
+    .detail-line { flex-direction:column; align-items:flex-start; gap:8px; }
+  }
+
   @media(max-width:700px){
     main{padding:20px 14px;}
     .card{padding:20px;}
@@ -680,50 +723,79 @@ function openLightbox(src) { document.getElementById('lightboxImg').src=src; doc
 // EXPENSE DETAIL MODAL
 // ═══════════════════════════════════════════
 async function openExpenseDetail(id) {
-  const expenses = state.currentUser.role === 'admin' ? allExpenses : allExpenses;
   const exp = allExpenses.find(e => e.id === id) || await fbGet('expenses', id);
   if (!exp) return;
-
   const isAdmin = state.currentUser.role === 'admin';
-  document.getElementById('modalBox').classList.add('modal-wide');
-  document.getElementById('modalTitle').textContent = exp.event;
+  const color = BIZ_COLORS[exp.businessLine]||'var(--white)';
 
+  // Build lines section
   const linesHtml = exp.lines ? exp.lines.map((l,i) => `
-    <div style="background:var(--black);border:1px solid var(--border);padding:12px 16px;margin-bottom:8px;display:flex;gap:20px;flex-wrap:wrap;align-items:center;">
+    <div class="detail-line">
+      <span class="detail-line-num">LINHA ${i+1}</span>
       <span class="cat-badge">${l.category}</span>
-      <span style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--accent2);">${CURR_SYMBOL[l.currency]} ${Number(l.amount).toLocaleString('pt-BR',{minimumFractionDigits:2})}</span>
-      ${l.description ? `<span style="font-size:12px;color:var(--text-dim);">${l.description}</span>` : ''}
-    </div>`).join('') : `<div style="background:var(--black);border:1px solid var(--border);padding:12px 16px;"><span class="cat-badge">${exp.category}</span> <span style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--accent2);">${CURR_SYMBOL[exp.currency]} ${Number(exp.amount).toLocaleString('pt-BR',{minimumFractionDigits:2})}</span></div>`;
-
-  const imgsHtml = exp.images && exp.images.length ? `
-    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
-      ${exp.images.map(img=>`<img src="${img.dataUrl}" onclick="openLightbox('${img.dataUrl}')" style="width:64px;height:64px;object-fit:cover;border:1px solid var(--border);cursor:pointer;">`).join('')}
-    </div>` : '<span style="color:var(--text-dim);font-size:13px;">Nenhuma imagem anexada</span>';
-
-  document.getElementById('modalBody').innerHTML = `
-    <div class="detail-grid">
-      <div class="detail-item"><label>Trader</label><span>${exp.userName}</span></div>
-      <div class="detail-item"><label>Linha de Negócio</label><span style="color:${BIZ_COLORS[exp.businessLine]||'var(--white)'};">${exp.businessLine||'—'}</span></div>
-      <div class="detail-item"><label>Data</label><span>${new Date(exp.date+'T12:00:00').toLocaleDateString('pt-BR')}</span></div>
-      <div class="detail-item"><label>Inclusão</label><span>${new Date(exp.createdAt).toLocaleString('pt-BR')}</span></div>
-      <div class="detail-item full"><label>Descrição Geral</label><span>${exp.description||'—'}</span></div>
-      <div class="detail-item full"><label>Status</label><span class="status-badge ${STATUS_CLASS[exp.status]}">${STATUS_LABEL[exp.status]}</span></div>
-      <div class="detail-divider"></div>
-      <div class="detail-item full"><label>Linhas de Despesa</label>${linesHtml}</div>
-      <div class="detail-divider"></div>
-      <div class="detail-item full"><label>Comprovantes</label>${imgsHtml}</div>
+      <span class="detail-line-amount">${CURR_SYMBOL[l.currency]} ${Number(l.amount).toLocaleString('pt-BR',{minimumFractionDigits:2})}</span>
+      ${l.description ? `<span class="detail-line-desc">${l.description}</span>` : ''}
+    </div>`).join('')
+  : `<div class="detail-line">
+      <span class="cat-badge">${exp.category||'—'}</span>
+      <span class="detail-line-amount">${CURR_SYMBOL[exp.currency]||''} ${Number(exp.amount||0).toLocaleString('pt-BR',{minimumFractionDigits:2})}</span>
     </div>`;
 
-  const actions = [`<button class="btn btn-outline" onclick="closeModal()">Fechar</button>`];
+  // Build images section
+  const imgsHtml = exp.images && exp.images.length
+    ? exp.images.map(img=>`<img class="detail-img" src="${img.dataUrl}" onclick="openLightbox('${img.dataUrl}')" title="${img.name||''}">`).join('')
+    : '<span style="color:var(--text-dim);font-size:13px;">Nenhuma imagem anexada</span>';
+
+  // Build action buttons
+  let actionsHtml = '';
   if (isAdmin && exp.status === 'pending') {
-    actions.unshift(`<button class="btn btn-outline" style="border-color:var(--danger);color:var(--danger);" onclick="changeStatus('${exp.id}','rejected');closeModal();">Recusar</button>`);
-    actions.unshift(`<button class="btn btn-gold" onclick="changeStatus('${exp.id}','approved');closeModal();">Aprovar</button>`);
+    actionsHtml = `
+      <button class="btn btn-gold" onclick="changeStatus('${exp.id}','approved');closeDetailPage();">✓ Aprovar</button>
+      <button class="btn btn-outline" style="border-color:var(--danger);color:var(--danger);" onclick="changeStatus('${exp.id}','rejected');closeDetailPage();">✕ Recusar</button>`;
+  } else if (isAdmin && exp.status === 'rejected') {
+    actionsHtml = `<button class="btn btn-danger-solid" onclick="deleteExpense('${exp.id}')">🗑 Excluir Prestação</button>`;
   }
-  if (isAdmin && exp.status === 'rejected') {
-    actions.unshift(`<button class="btn btn-danger-solid" onclick="deleteExpense('${exp.id}')">Excluir</button>`);
-  }
-  document.getElementById('modalActions').innerHTML = actions.join('');
-  document.getElementById('modalOverlay').classList.add('open');
+
+  document.getElementById('detailPageActions').innerHTML = actionsHtml;
+  document.getElementById('detailPageContent').innerHTML = `
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:6px;flex-wrap:wrap;">
+      <div class="detail-page-title">${exp.event}</div>
+      <span class="status-badge ${STATUS_CLASS[exp.status]}" style="font-size:12px;">${STATUS_LABEL[exp.status]}</span>
+    </div>
+    <div class="detail-page-sub">
+      Incluído em ${new Date(exp.createdAt).toLocaleString('pt-BR')}
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-section-title">INFORMAÇÕES GERAIS</div>
+      <div class="detail-meta-grid">
+        <div class="detail-meta-item"><label>Usuário</label><span>${exp.userName}</span></div>
+        <div class="detail-meta-item"><label>Linha de Negócio</label><span style="color:${color};font-weight:600;">${exp.businessLine||'—'}</span></div>
+        <div class="detail-meta-item"><label>Data da Despesa</label><span>${new Date(exp.date+'T12:00:00').toLocaleDateString('pt-BR')}</span></div>
+        <div class="detail-meta-item"><label>Qtd de Linhas</label><span>${exp.lines ? exp.lines.length : 1} linha(s)</span></div>
+        ${exp.description ? `<div class="detail-meta-item" style="grid-column:1/-1"><label>Descrição Geral</label><span>${exp.description}</span></div>` : ''}
+      </div>
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-section-title">LINHAS DE DESPESA</div>
+      ${linesHtml}
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-section-title">COMPROVANTES (${exp.images ? exp.images.length : 0} imagem(ns))</div>
+      <div class="detail-images">${imgsHtml}</div>
+    </div>
+
+    ${actionsHtml ? `<div class="detail-actions">${actionsHtml}</div>` : ''}
+  `;
+
+  document.getElementById('detailPage').style.display = 'block';
+  document.getElementById('detailPage').scrollTop = 0;
+}
+
+function closeDetailPage() {
+  document.getElementById('detailPage').style.display = 'none';
 }
 
 // ═══════════════════════════════════════════
