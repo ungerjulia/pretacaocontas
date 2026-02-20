@@ -1390,15 +1390,25 @@ function exportPDF() {
 // ═══════════════════════════════════════════
 let fullFilteredExpenses = [];
 
-function openFullListPage() {
+async function openFullListPage() {
   const page = document.getElementById('fullListPage');
   page.style.display = 'block';
   page.scrollTop = 0;
+
+  // Show loading
+  document.getElementById('fullExpTableBody').innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;"><span class="spinner" style="width:24px;height:24px;border-width:3px;"></span></td></tr>`;
+
+  // Always reload fresh data
+  try {
+    allExpenses = await fbGetAll('expenses');
+  } catch(e) { console.warn('Could not refresh expenses:', e); }
+
   // Populate filter selects
   const bizSel = document.getElementById('fullFilterBiz');
   bizSel.innerHTML = '<option value="">Todas as linhas</option>' + BIZ_LINES.map(l=>`<option>${l}</option>`).join('');
   const catSel = document.getElementById('fullFilterCat');
   catSel.innerHTML = '<option value="">Todas categorias</option>' + globalCategories.map(c=>`<option>${c}</option>`).join('');
+
   filterFullTable();
 }
 
