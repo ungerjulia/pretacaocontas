@@ -243,6 +243,21 @@
   @keyframes spin{to{transform:rotate(360deg)}}
 
 
+
+  /* FULL LIST PAGE */
+  #fullListPage {
+    display:none; position:fixed; inset:0;
+    background:var(--black); z-index:498;
+    overflow-y:auto; animation:fadeIn .2s ease;
+  }
+  .full-list-header {
+    background:var(--gray); border-bottom:1px solid var(--border);
+    padding:0 24px; height:60px;
+    display:flex; align-items:center; justify-content:space-between;
+    position:sticky; top:0; z-index:10;
+  }
+  .full-list-content { max-width:1300px; margin:0 auto; padding:28px 24px; }
+
   /* DETAIL PAGE */
   #detailPage {
     display:none; position:fixed; inset:0;
@@ -549,7 +564,7 @@ function renderTraderHTML(mine) {
       </div>
     </div>
     <div class="card">
-      <div class="card-title"><div class="dot"></div> Minhas Prestações <span style="font-size:12px;color:var(--text-dim);font-family:'DM Sans',sans-serif;margin-left:8px;">(clique para ver detalhes)</span></div>
+      <div class="card-title" style="justify-content:space-between;"><div style="display:flex;align-items:center;gap:10px;"><div class="dot"></div> Minhas Prestações</div><span style="font-size:11px;color:var(--text-dim);font-family:'DM Sans',sans-serif;font-weight:400;letter-spacing:0;">Clique para ver detalhes</span></div>
       ${mine.length===0 ? `<div class="empty-state"><div class="big">IB</div><p>Nenhuma prestação enviada ainda.</p></div>`
       : `<div class="expense-list">${mine.map(expenseCard).join('')}</div>`}
     </div>`;
@@ -558,16 +573,13 @@ function renderTraderHTML(mine) {
   renderExpenseLines();
 }
 
-function renderExpenseLines() {
-  const container = document.getElementById('expenseLinesContainer');
-  if (!container) return;
-  container.innerHTML = expenseLines.map((line, i) => `
-    <div class="expense-line" id="line_${line.id}">
+function buildLineHTML(line, showRemove) {
+  return `<div class="expense-line" id="line_${line.id}">
       <div class="expense-line-header">
-        <span class="expense-line-num">LINHA ${i+1}</span>
-        ${expenseLines.length > 1 ? `<button class="remove-line-btn" onclick="removeExpenseLine(${line.id})">✕</button>` : ''}
+        <span class="expense-line-num" id="linenum_${line.id}">LINHA</span>
+        ${showRemove ? `<button class="remove-line-btn" onclick="removeExpenseLine(${line.id})">✕</button>` : ''}
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;flex-wrap:wrap;">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
         <div class="field" style="margin-bottom:0">
           <label>Categoria *</label>
           <select id="cat_${line.id}">
@@ -592,16 +604,56 @@ function renderExpenseLines() {
           <input type="text" id="desc_${line.id}" placeholder="Descrição específica desta despesa...">
         </div>
       </div>
-    </div>`).join('');
+    </div>`;
+}
+
+function updateLineNumbers() {
+  expenseLines.forEach((line, i) => {
+    const el = document.getElementById(`linenum_${line.id}`);
+    if (el) el.textContent = `LINHA ${i+1}`;
+  });
+  // Update remove buttons visibility
+  expenseLines.forEach(line => {
+    const lineEl = document.getElementById(`line_${line.id}`);
+    if (!lineEl) return;
+    const existingBtn = lineEl.querySelector('.remove-line-btn');
+    if (expenseLines.length > 1 && !existingBtn) {
+      const header = lineEl.querySelector('.expense-line-header');
+      const btn = document.createElement('button');
+      btn.className = 'remove-line-btn';
+      btn.innerHTML = '✕';
+      btn.onclick = () => removeExpenseLine(line.id);
+      header.appendChild(btn);
+    } else if (expenseLines.length === 1 && existingBtn) {
+      existingBtn.remove();
+    }
+  });
+}
+
+function renderExpenseLines() {
+  const container = document.getElementById('expenseLinesContainer');
+  if (!container) return;
+  container.innerHTML = expenseLines.map((line, i) => buildLineHTML(line, expenseLines.length > 1)).join('');
+  updateLineNumbers();
 }
 
 function addExpenseLine() {
-  expenseLines.push({ id: Date.now() });
-  renderExpenseLines();
+  const container = document.getElementById('expenseLinesContainer');
+  if (!container) return;
+  const newLine = { id: Date.now() };
+  expenseLines.push(newLine);
+  // Append only the new line — don't re-render existing ones
+  const div = document.createElement('div');
+  div.innerHTML = buildLineHTML(newLine, true);
+  container.appendChild(div.firstElementChild);
+  updateLineNumbers();
 }
+
 function removeExpenseLine(id) {
   expenseLines = expenseLines.filter(l => l.id !== id);
-  renderExpenseLines();
+  const el = document.getElementById(`line_${id}`);
+  if (el) el.remove();
+  updateLineNumbers();
 }
 
 function expenseCard(e) {
@@ -888,7 +940,14 @@ function renderTab() {
 function renderExpensesTab() {
   document.getElementById('tabContent').innerHTML = `
     <div class="card">
-      <div class="card-title"><div class="dot"></div> Todas as Prestações <span style="font-size:12px;color:var(--text-dim);font-family:'DM Sans',sans-serif;margin-left:8px;">(clique para ver detalhes)</span></div>
+      <div class="card-title" style="justify-content:space-between;">
+        <div style="display:flex;align-items:center;gap:10px;cursor:pointer;" onclick="openFullListPage()">
+          <div class="dot"></div>
+          <span style="border-bottom:1px solid rgba(200,168,75,0.3);">Todas as Prestações</span>
+          <span style="font-size:11px;color:var(--accent);font-family:'DM Sans',sans-serif;font-weight:400;letter-spacing:0;">↗ Tela cheia</span>
+        </div>
+        <span style="font-size:11px;color:var(--text-dim);font-family:'DM Sans',sans-serif;font-weight:400;letter-spacing:0;">Clique em qualquer linha para detalhes</span>
+      </div>
       <div class="filters">
         <input type="text" id="filterText" placeholder="Buscar trader, evento..." oninput="filterTable()" style="min-width:180px;">
         <select id="filterBiz" onchange="filterTable()">
@@ -948,7 +1007,7 @@ function filterTable() {
     const initials = e.userName.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase();
     const cats = e.lines ? [...new Set(e.lines.map(l=>l.category))].map(c=>`<span class="cat-badge" style="margin-right:3px;">${c}</span>`).join('') : `<span class="cat-badge">${e.category}</span>`;
     const amounts = e.lines ? e.lines.map(l=>`${CURR_SYMBOL[l.currency]} ${Number(l.amount).toLocaleString('pt-BR',{minimumFractionDigits:2})}`).join('<br>') : `${CURR_SYMBOL[e.currency]} ${Number(e.amount).toLocaleString('pt-BR',{minimumFractionDigits:2})}`;
-    return `<tr class="clickable" onclick="openExpenseDetail('${e.id}')">
+    return `<tr class="clickable" onclick="openExpenseDetail('${e.id}')" style="cursor:pointer;">
       <td><div style="display:flex;align-items:center;gap:8px;"><div class="trader-avatar">${initials}</div>${e.userName}</div></td>
       <td><span style="font-size:10px;letter-spacing:1px;text-transform:uppercase;color:${color};">${e.businessLine||'—'}</span></td>
       <td><strong>${e.event}</strong><br><small style="color:var(--text-dim)">${e.description||''}</small></td>
@@ -956,10 +1015,12 @@ function filterTable() {
       <td style="color:var(--text-dim);font-size:12px;">${new Date(e.date+'T12:00:00').toLocaleDateString('pt-BR')}<br><span style="font-size:10px;">incl. ${new Date(e.createdAt).toLocaleDateString('pt-BR')}</span></td>
       <td style="font-family:'Bebas Neue',sans-serif;font-size:15px;color:var(--accent2);">${amounts}</td>
       <td><span class="status-badge ${STATUS_CLASS[e.status]}">${STATUS_LABEL[e.status]}</span></td>
-      <td onclick="event.stopPropagation()">
+      <td onclick="event.stopPropagation()" style="white-space:nowrap;">
         ${e.status==='pending' ? `
-          <button class="action-btn action-approve" onclick="changeStatus('${e.id}','approved')">Aprovar</button>
-          <button class="action-btn action-reject" style="margin-left:4px;" onclick="changeStatus('${e.id}','rejected')">Recusar</button>
+          <div style="display:flex;gap:5px;">
+            <button class="action-btn action-approve" onclick="changeStatus('${e.id}','approved')" title="Aprovar">✓ Aprovar</button>
+            <button class="action-btn action-reject" onclick="changeStatus('${e.id}','rejected')" title="Recusar">✕ Recusar</button>
+          </div>
         ` : e.status==='rejected' ? `
           <button class="action-btn action-delete" onclick="deleteExpense('${e.id}')">Excluir</button>
         ` : `<span style="color:var(--text-dim);font-size:11px;">—</span>`}
@@ -1107,7 +1168,7 @@ function openNewUserModal() {
   document.getElementById('modalBody').innerHTML = `
     <div class="field"><label>Nome Completo *</label><input type="text" id="newName" placeholder="João Silva"></div>
     <div class="field"><label>E-mail *</label><input type="email" id="newEmail" placeholder="joao@independentbrazil.com"></div>
-    <div class="field"><label>Senha *</label><input type="password" id="newPass" placeholder="Mínimo 6 caracteres"></div>
+    <div class="field"><label>Senha *</label><input type="password" id="newPass" placeholder="Mínimo 4 caracteres"></div>
     <div class="field"><label>Linha de Negócio *</label>
       <select id="newBizLine">
         <option value="">— Selecione —</option>
@@ -1126,8 +1187,8 @@ async function createUser() {
   const email = document.getElementById('newEmail').value.trim();
   const pass = document.getElementById('newPass').value;
   const bizLine = document.getElementById('newBizLine').value;
-  if (!name || !email || pass.length < 6 || !bizLine) {
-    document.getElementById('newUserError').textContent = 'Preencha todos os campos (senha mínimo 6 caracteres).'; return;
+  if (!name || !email || pass.length < 4 || !bizLine) {
+    document.getElementById('newUserError').textContent = 'Preencha todos os campos (senha mínimo 4 caracteres).'; return;
   }
   try {
     const all = await fbGetAll('users');
@@ -1321,6 +1382,84 @@ function exportPDF() {
   });
   doc.save(`IB_Prestacoes_${new Date().toISOString().slice(0,10)}.pdf`);
   toast('PDF exportado! ✓');
+}
+
+
+// ═══════════════════════════════════════════
+// FULL LIST PAGE
+// ═══════════════════════════════════════════
+let fullFilteredExpenses = [];
+
+function openFullListPage() {
+  const page = document.getElementById('fullListPage');
+  page.style.display = 'block';
+  page.scrollTop = 0;
+  // Populate filter selects
+  const bizSel = document.getElementById('fullFilterBiz');
+  bizSel.innerHTML = '<option value="">Todas as linhas</option>' + BIZ_LINES.map(l=>`<option>${l}</option>`).join('');
+  const catSel = document.getElementById('fullFilterCat');
+  catSel.innerHTML = '<option value="">Todas categorias</option>' + globalCategories.map(c=>`<option>${c}</option>`).join('');
+  filterFullTable();
+}
+
+function closeFullListPage() {
+  document.getElementById('fullListPage').style.display = 'none';
+}
+
+function filterFullTable() {
+  const txt = (document.getElementById('fullFilterText')?.value||'').toLowerCase();
+  const biz = document.getElementById('fullFilterBiz')?.value||'';
+  const cat = document.getElementById('fullFilterCat')?.value||'';
+  const status = document.getElementById('fullFilterStatus')?.value||'';
+
+  fullFilteredExpenses = allExpenses.filter(e => {
+    const cats = e.lines ? e.lines.map(l=>l.category).join(' ') : (e.category||'');
+    return (!txt || e.userName.toLowerCase().includes(txt) || e.event.toLowerCase().includes(txt) || (e.description||'').toLowerCase().includes(txt))
+        && (!biz || e.businessLine===biz)
+        && (!cat || cats.includes(cat))
+        && (!status || e.status===status);
+  });
+
+  const tbody = document.getElementById('fullExpTableBody');
+  if (!tbody) return;
+  if (!fullFilteredExpenses.length) {
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-dim);padding:40px;">Nenhuma prestação encontrada.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = fullFilteredExpenses.map(e => {
+    const color = BIZ_COLORS[e.businessLine]||'var(--text-dim)';
+    const initials = e.userName.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase();
+    const cats = e.lines ? [...new Set(e.lines.map(l=>l.category))].map(c=>`<span class="cat-badge" style="margin-right:3px;">${c}</span>`).join('') : `<span class="cat-badge">${e.category}</span>`;
+    const amounts = e.lines ? e.lines.map(l=>`${CURR_SYMBOL[l.currency]} ${Number(l.amount).toLocaleString('pt-BR',{minimumFractionDigits:2})}`).join('<br>') : `${CURR_SYMBOL[e.currency]} ${Number(e.amount).toLocaleString('pt-BR',{minimumFractionDigits:2})}`;
+    return `<tr class="clickable" onclick="openExpenseDetail('${e.id}')" style="cursor:pointer;">
+      <td><div style="display:flex;align-items:center;gap:8px;"><div class="trader-avatar">${initials}</div>${e.userName}</div></td>
+      <td><span style="font-size:10px;letter-spacing:1px;text-transform:uppercase;color:${color};">${e.businessLine||'—'}</span></td>
+      <td><strong>${e.event}</strong><br><small style="color:var(--text-dim)">${e.description||''}</small></td>
+      <td>${cats}</td>
+      <td style="color:var(--text-dim);font-size:12px;">${new Date(e.date+'T12:00:00').toLocaleDateString('pt-BR')}<br><span style="font-size:10px;">incl. ${new Date(e.createdAt).toLocaleDateString('pt-BR')}</span></td>
+      <td style="font-family:'Bebas Neue',sans-serif;font-size:15px;color:var(--accent2);">${amounts}</td>
+      <td><span class="status-badge ${STATUS_CLASS[e.status]}">${STATUS_LABEL[e.status]}</span></td>
+      <td onclick="event.stopPropagation()" style="white-space:nowrap;">
+        ${e.status==='pending' ? `
+          <div style="display:flex;gap:5px;">
+            <button class="action-btn action-approve" onclick="changeStatus('${e.id}','approved')" title="Aprovar">✓ Aprovar</button>
+            <button class="action-btn action-reject" onclick="changeStatus('${e.id}','rejected')" title="Recusar">✕ Recusar</button>
+          </div>
+        ` : e.status==='rejected' ? `
+          <button class="action-btn action-delete" onclick="deleteExpense('${e.id}')">Excluir</button>
+        ` : `<span style="color:var(--text-dim);font-size:11px;">—</span>`}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function exportExcelFull() {
+  filteredExpenses = fullFilteredExpenses;
+  exportExcel();
+}
+function exportPDFFull() {
+  filteredExpenses = fullFilteredExpenses;
+  exportPDF();
 }
 
 // ═══════════════════════════════════════════
