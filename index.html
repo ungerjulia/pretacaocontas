@@ -25,6 +25,8 @@
       if (!(await getDoc(aRef)).exists()) await setDoc(aRef,{id:'u0',name:'Admin Financeiro',email:'financial@independentbrazil.com',password:'admin123',role:'admin',createdAt:new Date().toISOString()});
       const cRef = doc(db,'config','categories');
       if (!(await getDoc(cRef)).exists()) await setDoc(cRef,{list:['Viagem','Aluguel de Carro','Alimentação','Brinde','Outros']});
+      const eRef = doc(db,'config','events');
+      if (!(await getDoc(eRef)).exists()) await setDoc(eRef,{list:[]});
     } catch(e){ console.error(e); }
     window._firebaseReady = true;
     document.dispatchEvent(new Event('firebaseReady'));
@@ -333,6 +335,7 @@ const S_CLASS = {pending:'s-pending',approved:'s-approved',rejected:'s-rejected'
 let CU = null; // current user
 let allExp = [];
 let cats = ['Viagem','Aluguel de Carro','Alimentação','Brinde','Outros'];
+let events = [];
 let expLines = [{id: Date.now()}];
 let pendingImgs = [];
 let adminTab = 'expenses';
@@ -371,6 +374,11 @@ async function loadCats() {
   if (cfg && cfg.list) cats = cfg.list;
 }
 async function saveCats() { await setOne('config','categories',{list:cats}); }
+async function loadEvents() {
+  const cfg = await getOne('config','events');
+  if (cfg && cfg.list) events = cfg.list;
+}
+async function saveEvents() { await setOne('config','events',{list:events}); }
 
 // ═══════════════════════════
 // SESSION
@@ -386,6 +394,7 @@ window.addEventListener('load', () => {
 
 document.addEventListener('firebaseReady', async () => {
   await loadCats();
+  await loadEvents();
   const saved = SS.load();
   if (saved) {
     try {
@@ -467,7 +476,13 @@ async function renderTrader() {
     <div class="card">
       <div class="card-title"><div class="card-title-left"><div class="dot"></div> Nova Prestação</div></div>
       <div class="form-grid">
-        <div class="field"><label>Evento *</label><input type="text" id="fEvento" placeholder="Ex: Reunião Porto / Fenavem 2024"></div>
+        <div class="field"><label>Evento *</label>
+          <select id="fEvento">
+            <option value="">— Selecione o evento —</option>
+            ${events.map(ev=>`<option>${ev}</option>`).join('')}
+          </select>
+          ${events.length===0 ? '<small style="color:var(--danger);font-size:11px;margin-top:4px;display:block;">Nenhum evento cadastrado. Solicite ao administrador.</small>' : ''}
+        </div>
         <div class="field"><label>Data *</label><input type="date" id="fData"></div>
         <div class="field full"><label>Descrição Geral</label><input type="text" id="fDesc" placeholder="Detalhes adicionais..."></div>
       </div>
@@ -832,6 +847,7 @@ function renderAdminHTML() {
       <button class="tab ${adminTab==='expenses'?'active':''}" data-tab="expenses">Prestações</button>
       <button class="tab ${adminTab==='users'?'active':''}" data-tab="users">Usuários</button>
       <button class="tab ${adminTab==='categories'?'active':''}" data-tab="categories">Categorias</button>
+      <button class="tab ${adminTab==='events'?'active':''}" data-tab="events">Eventos</button>
     </div>
     <div id="tabContent"></div>`;
 
@@ -854,7 +870,8 @@ function renderAdminHTML() {
 function renderTab() {
   if (adminTab === 'expenses') renderExpTab();
   else if (adminTab === 'users') renderUsersTab();
-  else renderCatsTab();
+  else if (adminTab === 'categories') renderCatsTab();
+  else renderEventsTab();
 }
 
 // ═══════════════════════════
@@ -1058,6 +1075,41 @@ async function deleteUser(id) {
 // ═══════════════════════════
 // CATEGORIES TAB
 // ═══════════════════════════
+function renderEventsTab() {
+  document.getElementById('tabContent').innerHTML = `
+    <div class="card">
+      <div class="card-title"><div class="card-title-left"><div class="dot"></div> Gerenciar Eventos</div></div>
+      <p style="font-size:13px;color:var(--dim);margin-bottom:18px;">Eventos disponíveis para seleção ao lançar uma prestação de contas.</p>
+      <div class="cat-list">${events.map((ev,i)=>`
+        <div class="cat-tag"><span>${ev}</span><button data-ei="${i}">✕</button></div>`).join('')}
+        ${events.length===0 ? '<span style="color:var(--dim);font-size:13px;">Nenhum evento cadastrado ainda.</span>' : ''}
+      </div>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+        <div class="field" style="margin:0;flex:1;min-width:200px;"><label>Novo Evento</label><input type="text" id="newEvInp" placeholder="Ex: Fenavem 2025 / Reunião Porto"></div>
+        <button class="btn btn-gold" id="addEvBtn" style="margin-top:20px;">+ Adicionar</button>
+      </div>
+    </div>`;
+
+  document.querySelectorAll('[data-ei]').forEach(btn => {
+    btn.onclick = () => removeEvent(parseInt(btn.dataset.ei));
+  });
+  document.getElementById('addEvBtn').onclick = addEvent;
+  document.getElementById('newEvInp').onkeydown = e => { if(e.key==='Enter') addEvent(); };
+}
+
+async function addEvent() {
+  const inp = document.getElementById('newEvInp');
+  const val = inp?.value.trim();
+  if (!val) return;
+  if (events.map(e=>e.toLowerCase()).includes(val.toLowerCase())) { toast('Evento já existe.', true); return; }
+  events.push(val); await saveEvents(); toast('Evento adicionado! ✓'); renderEventsTab();
+}
+
+async function removeEvent(i) {
+  if (!confirm(`Remover o evento "${events[i]}"?`)) return;
+  events.splice(i,1); await saveEvents(); toast('Evento removido.'); renderEventsTab();
+}
+
 function renderCatsTab() {
   document.getElementById('tabContent').innerHTML = `
     <div class="card">
