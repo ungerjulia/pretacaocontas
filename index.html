@@ -287,7 +287,7 @@ td{padding:11px 14px;font-size:13px;border-bottom:1px solid rgba(255,255,255,0.0
       <div><div class="h-brand">INDEPENDENT BRAZIL</div><div class="h-role" id="hRole"></div></div>
     </div>
     <div class="h-right">
-      <div class="user-pill" id="hUser"></div>
+      <div class="user-pill" id="hUser" style="cursor:pointer;" title="Alterar senha" onclick="openChangePassModal()"></div>
       <button class="btn btn-outline" style="padding:8px 14px;font-size:11px;display:none;" id="toggleViewBtn"></button>
       <button class="btn btn-outline" style="padding:8px 14px;font-size:11px;" id="logoutBtn">Sair</button>
     </div>
@@ -519,7 +519,10 @@ async function renderTrader() {
           <div class="prev-grid" id="prevGrid"></div>
         </label>
       </div>
-      <div style="margin-top:20px;"><button class="btn btn-gold" id="submitBtn">Enviar Prestação</button></div>
+      <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn btn-gold" id="submitBtn">Enviar Prestação</button>
+        <button class="btn btn-outline" id="previewPdfBtn">⬇ Baixar PDF</button>
+      </div>
     </div>
     <div class="card">
       <div class="card-title"><div class="card-title-left"><div class="dot"></div> Minhas Prestações</div><span style="font-size:11px;color:var(--dim);font-family:'DM Sans',sans-serif;font-weight:400;letter-spacing:0;">Clique para ver detalhes</span></div>
@@ -539,6 +542,7 @@ async function renderTrader() {
   document.getElementById('addLineBtn').onclick = addLine;
   document.getElementById('fImgs').onchange = handleImgUpload;
   document.getElementById('submitBtn').onclick = submitExp;
+  document.getElementById('previewPdfBtn').onclick = previewExpPDF;
 
   // Expense item clicks
   if (document.getElementById('expList')) {
@@ -661,6 +665,98 @@ function renderPrevs() {
 // ═══════════════════════════
 // SUBMIT
 // ═══════════════════════════
+function previewExpPDF() {
+  const evento = document.getElementById('fEvento').value.trim();
+  const data = document.getElementById('fData').value;
+  const desc = document.getElementById('fDesc').value.trim();
+  if (!evento || !data) { toast('Preencha evento e data antes de gerar o PDF.', true); return; }
+
+  const lines = [];
+  for (const l of expLines) {
+    const cat = document.getElementById('lc_'+l.id)?.value;
+    const val = parseFloat(document.getElementById('lv_'+l.id)?.value);
+    const moeda = document.getElementById('lm_'+l.id)?.value || 'BRL';
+    const ld = document.getElementById('ld_'+l.id)?.value.trim();
+    if (cat && !isNaN(val) && val > 0) lines.push({category:cat, amount:val, currency:moeda, description:ld||''});
+  }
+  if (!lines.length) { toast('Preencha ao menos uma linha de despesa.', true); return; }
+
+  const exp = {
+    event: evento, date: data, description: desc, lines,
+    userName: CU.name, businessLine: CU.businessLine||'',
+    status: 'pending', createdAt: new Date().toISOString()
+  };
+
+  const {jsPDF} = window.jspdf;
+  const doc = new jsPDF();
+
+  // Header
+  doc.setFillColor(10,10,10); doc.rect(0,0,210,28,'F');
+  doc.setTextColor(245,245,240); doc.setFontSize(20); doc.setFont('helvetica','bold');
+  doc.text('INDEPENDENT BRAZIL', 14, 16);
+  doc.setFontSize(9); doc.setFont('helvetica','normal');
+  doc.setTextColor(200,168,75); doc.text('Prestação de Contas', 14, 23);
+
+  // Status badge
+  doc.setFillColor(200,168,75); doc.rect(160,8,40,12,'F');
+  doc.setTextColor(10,10,10); doc.setFontSize(9); doc.setFont('helvetica','bold');
+  doc.text('PENDENTE', 167, 16);
+
+  // Event title
+  doc.setTextColor(10,10,10); doc.setFontSize(18); doc.setFont('helvetica','bold');
+  doc.text(exp.event, 14, 42);
+
+  // Info grid
+  doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(120,120,120);
+  doc.text('COLABORADOR', 14, 54); doc.text('LINHA DE NEGÓCIO', 80, 54);
+  doc.text('DATA', 150, 54);
+  doc.setTextColor(10,10,10); doc.setFontSize(10); doc.setFont('helvetica','bold');
+  doc.text(exp.userName, 14, 61);
+  doc.text(exp.businessLine||'—', 80, 61);
+  doc.text(fmtDate(exp.date), 150, 61);
+
+  if (exp.description) {
+    doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(120,120,120);
+    doc.text('DESCRIÇÃO GERAL', 14, 72);
+    doc.setTextColor(10,10,10); doc.setFontSize(10); doc.setFont('helvetica','normal');
+    doc.text(exp.description, 14, 78);
+  }
+
+  doc.setDrawColor(220,220,220); doc.line(14, 85, 196, 85);
+
+  // Lines table
+  doc.setFontSize(8); doc.setFont('helvetica','bold'); doc.setTextColor(120,120,120);
+  doc.text('LINHAS DE DESPESA', 14, 92);
+  doc.autoTable({
+    head:[['#','Categoria','Descrição','Moeda','Valor']],
+    body: lines.map((l,i) => [`Linha ${i+1}`, l.category, l.description||'—', l.currency, `${SYM[l.currency]} ${fmt(l.amount)}`]),
+    startY: 96,
+    styles:{fontSize:9, cellPadding:5},
+    headStyles:{fillColor:[10,10,10], textColor:[200,168,75], fontStyle:'bold'},
+    columnStyles:{4:{halign:'right', fontStyle:'bold'}},
+    alternateRowStyles:{fillColor:[248,248,245]},
+  });
+
+  // Totals
+  const totals = {};
+  lines.forEach(l => { totals[l.currency] = (totals[l.currency]||0) + l.amount; });
+  let y = doc.lastAutoTable.finalY + 8;
+  doc.setFontSize(8); doc.setTextColor(120,120,120); doc.setFont('helvetica','normal');
+  doc.text('TOTAL', 140, y);
+  Object.entries(totals).forEach(([cur, val]) => {
+    y += 7;
+    doc.setFontSize(13); doc.setTextColor(10,10,10); doc.setFont('helvetica','bold');
+    doc.text(`${SYM[cur]} ${fmt(val)}`, 140, y);
+  });
+
+  // Footer
+  doc.setFontSize(8); doc.setTextColor(180,180,180); doc.setFont('helvetica','normal');
+  doc.text(`Gerado em ${new Date().toLocaleString('pt-BR')} · Independent Brazil`, 14, 285);
+
+  doc.save(`IB_${exp.event.replace(/\s/g,'_')}_${exp.date}.pdf`);
+  toast('PDF gerado! ✓');
+}
+
 async function submitExp() {
   const evento = document.getElementById('fEvento').value.trim();
   const data = document.getElementById('fData').value;
@@ -1260,12 +1356,26 @@ async function renderUsersTab() {
   document.getElementById('tabContent').innerHTML = '<div style="text-align:center;padding:40px;"><span class="spinner" style="width:24px;height:24px;border-width:3px;"></span></div>';
   const all = await getAll('users');
   const traders = all.filter(u=>u.role==='trader');
-  const admins = all.filter(u=>u.role==='admin');
+  const admins = all.filter(u=>u.role==='admin' && u.businessLine !== 'TI');
+  const tiUsers = all.filter(u=>u.businessLine==='TI');
   document.getElementById('tabContent').innerHTML = `
     <div class="card">
       <div class="card-title"><div class="card-title-left"><div class="dot"></div> Usuários Cadastrados</div></div>
       <div style="margin-bottom:20px;"><button class="btn btn-gold" id="newUserBtn">+ Novo Usuário</button></div>
-      ${!traders.length && !admins.length ? '<div class="empty"><div class="big">0</div><p>Nenhum usuário ainda.</p></div>' : ''}
+      ${!traders.length && !admins.length && !tiUsers.length ? '<div class="empty"><div class="big">0</div><p>Nenhum usuário ainda.</p></div>' : ''}
+      ${tiUsers.length ? `
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:13px;letter-spacing:3px;color:#06b6d4;margin-bottom:10px;">TI / SUPORTE</div>
+        <div class="users-grid" style="margin-bottom:24px;">${tiUsers.map(u=>`
+          <div class="user-card" style="border-color:rgba(6,182,212,0.3);">
+            <div class="user-av" style="background:#06b6d4;color:#000;">${u.name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase()}</div>
+            <div>
+              <strong style="font-size:14px;display:block;">${u.name}</strong>
+              <small style="font-size:12px;color:var(--dim);">${u.email}</small>
+              <div style="font-size:11px;color:#06b6d4;letter-spacing:1px;text-transform:uppercase;margin-top:2px;">TI · SUPORTE</div>
+              ${u.id !== 'u_julia' ? `<button class="act-btn act-reject" style="margin-top:8px;" data-uid="${u.id}">Remover</button>` : '<small style="font-size:10px;color:var(--dim);margin-top:6px;display:block;">Usuário TI principal</small>'}
+            </div>
+          </div>`).join('')}
+        </div>` : ''}
       ${admins.length ? `
         <div style="font-family:'Bebas Neue',sans-serif;font-size:13px;letter-spacing:3px;color:var(--dim);margin-bottom:10px;">ADMINISTRADORES</div>
         <div class="users-grid" style="margin-bottom:24px;">${admins.map(u=>`
@@ -1311,6 +1421,7 @@ function openNewUserModal() {
       <select id="nRole" onchange="toggleBizField()">
         <option value="trader">Colaborador (lança prestações)</option>
         <option value="admin">Admin (aprova e gerencia)</option>
+        <option value="ti">TI / Suporte (acesso total)</option>
       </select>
     </div>
     <div id="bizFieldWrap" class="field"><label>Linha de Negócio *</label>
@@ -1336,7 +1447,7 @@ function openNewUserModal() {
 function toggleBizField() {
   const role = document.getElementById('nRole')?.value;
   const wrap = document.getElementById('bizFieldWrap');
-  if (wrap) wrap.style.display = role === 'admin' ? 'none' : 'block';
+  if (wrap) wrap.style.display = (role === 'admin' || role === 'ti') ? 'none' : 'block';
 }
 
 async function createUser() {
@@ -1351,7 +1462,9 @@ async function createUser() {
     const all = await getAll('users');
     if (all.find(u=>u.email===email)) { document.getElementById('nErr').textContent='E-mail já cadastrado.'; return; }
     const id = 'u'+Date.now();
-    await setOne('users',id,{id,name,email,password:pass,role,businessLine:role==='admin'?'Admin':biz,createdAt:new Date().toISOString()});
+    const bizLine = role === 'admin' ? 'Admin' : role === 'ti' ? 'TI' : biz;
+    const actualRole = role === 'ti' ? 'admin' : role; // TI uses admin role internally
+    await setOne('users',id,{id,name,email,password:pass,role:actualRole,businessLine:bizLine,createdAt:new Date().toISOString()});
     await writeLog('USUÁRIO CRIADO', `Usuário "${name}" (${email}) criado com acesso ${role}.`);
     closeModal(); toast('Usuário cadastrado! ✓'); renderUsersTab();
   } catch(e) { toast('Erro ao cadastrar.', true); }
@@ -1552,6 +1665,46 @@ function exportPDF() {
 // ═══════════════════════════
 function openModal() { document.getElementById('overlay').classList.add('open'); }
 function closeModal() { document.getElementById('overlay').classList.remove('open'); document.getElementById('modalBox').classList.remove('modal-wide'); }
+
+function openChangePassModal() {
+  document.getElementById('modalBox').classList.remove('modal-wide');
+  document.getElementById('mTitle').textContent = 'Alterar Senha';
+  document.getElementById('mBody').innerHTML = `
+    <p style="font-size:13px;color:var(--dim);margin-bottom:18px;">Usuário: <strong>${CU.name}</strong> · ${CU.email}</p>
+    <div class="field"><label>Senha Atual *</label><input type="password" id="cpCurrent" placeholder="••••••••"></div>
+    <div class="field"><label>Nova Senha *</label><input type="password" id="cpNew" placeholder="Mínimo 4 caracteres"></div>
+    <div class="field"><label>Confirmar Nova Senha *</label><input type="password" id="cpConfirm" placeholder="Repita a nova senha"></div>
+    <div id="cpErr" class="error-msg"></div>`;
+  document.getElementById('mActions').innerHTML = '';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn btn-outline'; cancelBtn.textContent = 'Cancelar';
+  cancelBtn.onclick = closeModal;
+  const saveBtn = document.createElement('button');
+  saveBtn.className = 'btn btn-gold'; saveBtn.textContent = 'Salvar Senha';
+  saveBtn.onclick = changePassword;
+  document.getElementById('mActions').append(cancelBtn, saveBtn);
+  openModal();
+}
+
+async function changePassword() {
+  const current = document.getElementById('cpCurrent').value;
+  const newPass = document.getElementById('cpNew').value;
+  const confirm = document.getElementById('cpConfirm').value;
+  const err = document.getElementById('cpErr');
+
+  if (!current || !newPass || !confirm) { err.textContent = 'Preencha todos os campos.'; return; }
+  if (current !== CU.password) { err.textContent = 'Senha atual incorreta.'; return; }
+  if (newPass.length < 4) { err.textContent = 'Nova senha deve ter mínimo 4 caracteres.'; return; }
+  if (newPass !== confirm) { err.textContent = 'As senhas não coincidem.'; return; }
+
+  try {
+    await updateOne('users', CU.id, { password: newPass });
+    CU.password = newPass;
+    SS.save(CU);
+    closeModal();
+    toast('Senha alterada com sucesso! ✓');
+  } catch(e) { err.textContent = 'Erro ao salvar. Tente novamente.'; }
+}
 document.getElementById('overlay').addEventListener('click', e => { if(e.target===e.currentTarget) closeModal(); });
 
 // ═══════════════════════════
