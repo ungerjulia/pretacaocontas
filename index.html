@@ -498,7 +498,7 @@ async function renderTrader() {
     const allBuds = await getAll('budgets');
     const approved = mine.filter(e=>e.status==='approved');
     const today = new Date().toISOString().slice(0,10);
-    myBudgets = allBuds.filter(b => b.userId === CU.id);
+    myBudgets = allBuds.filter(b => b.userId === CU.id && b.status !== 'rejected');
     myBudgets = myBudgets.map(b => {
       const spent = approved
         .filter(e => e.event === b.event)
@@ -517,7 +517,7 @@ async function renderTrader() {
 
   const budgetSection = myBudgets.length ? `
     <div class="card" style="margin-bottom:20px;">
-      <div class="card-title"><div class="card-title-left"><div class="dot"></div> Meus Orçamentos</div></div>
+      <div class="card-title"><div class="card-title-left"><div class="dot"></div> Meus Adiantamentos</div></div>
       ${myBudgets.map(b => `
         <div class="budget-card ${b.isOver?'over':''}">
           <div class="budget-header">
@@ -528,17 +528,21 @@ async function renderTrader() {
               </div>
             </div>
             <div style="text-align:right;">
-              <div style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Saldo disponível</div>
-              <div class="budget-saldo ${b.isOver?'over':b.pct>80?'warn':'ok'}">${SYM[b.currency]} ${fmt(Math.abs(b.saldo))} ${b.isOver?'<span style="font-size:12px;">(negativo)</span>':''}</div>
+              ${b.status==='pending'
+                ? `<span class="status-badge s-pending">Aguardando aprovação</span>`
+                : `<div style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Saldo disponível</div>
+                   <div class="budget-saldo ${b.isOver?'over':b.pct>80?'warn':'ok'}">${SYM[b.currency]} ${fmt(Math.abs(b.saldo))} ${b.isOver?'<span style="font-size:12px;">(negativo)</span>':''}</div>`
+              }
             </div>
           </div>
+          ${b.status==='approved' ? `
           <div class="budget-bar-wrap">
             <div class="budget-bar" style="width:${b.pct}%;background:${b.barColor};"></div>
           </div>
           <div class="budget-amounts">
-            <span>Gasto (aprovado): <strong>${SYM[b.currency]} ${fmt(b.spent)}</strong></span>
-            <span>Total: <strong>${SYM[b.currency]} ${fmt(b.amount)}</strong></span>
-          </div>
+            <span>Prestado (aprovado): <strong>${SYM[b.currency]} ${fmt(b.spent)}</strong></span>
+            <span>Adiantado: <strong>${SYM[b.currency]} ${fmt(b.amount)}</strong></span>
+          </div>` : `<div style="font-size:12px;color:var(--dim);margin-top:8px;">Solicitado: ${SYM[b.currency]} ${fmt(b.amount)} · ${fmtDate(b.startDate)} → ${fmtDate(b.endDate)}</div>`}
         </div>`).join('')}
     </div>` : '';
 
@@ -552,6 +556,28 @@ async function renderTrader() {
       <div class="stat-card"><div class="stat-label">Recusadas</div><div class="stat-value">${mine.filter(e=>e.status==='rejected').length}</div><div class="stat-sub">recusadas</div></div>
     </div>
     ${budgetSection}
+    <div class="card" style="border-color:rgba(200,168,75,0.3);">
+      <div class="card-title"><div class="card-title-left"><div class="dot"></div> Solicitar Adiantamento</div>
+        <span style="font-size:11px;color:var(--dim);font-family:'DM Sans',sans-serif;font-weight:400;letter-spacing:0;">Solicite saldo antes de viajar</span>
+      </div>
+      <div class="form-grid">
+        <div class="field full"><label>Evento *</label>
+          <select id="aEvento">
+            <option value="">— Selecione o evento —</option>
+            ${events.map(ev=>`<option>${ev}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Valor Solicitado *</label><input type="number" id="aAmount" placeholder="0,00" step="0.01" min="0"></div>
+        <div class="field"><label>Moeda *</label>
+          <select id="aCurrency"><option value="BRL">R$ Real</option><option value="USD">$ USD</option><option value="EUR">€ Euro</option></select>
+        </div>
+        <div class="field"><label>Data Início *</label><input type="date" id="aStart" style="color-scheme:dark;"></div>
+        <div class="field"><label>Data Término *</label><input type="date" id="aEnd" style="color-scheme:dark;"></div>
+        <div class="field full"><label>Justificativa</label><input type="text" id="aJustify" placeholder="Motivo do adiantamento..."></div>
+      </div>
+      <div style="margin-top:16px;"><button class="btn btn-gold" id="submitAdvBtn">Solicitar Adiantamento</button></div>
+    </div>
+
     <div class="card">
       <div class="card-title"><div class="card-title-left"><div class="dot"></div> Nova Prestação</div></div>
       <div class="form-grid">
@@ -602,6 +628,11 @@ async function renderTrader() {
   document.getElementById('fImgs').onchange = handleImgUpload;
   document.getElementById('submitBtn').onclick = submitExp;
   document.getElementById('previewPdfBtn').onclick = previewExpPDF;
+  document.getElementById('submitAdvBtn').onclick = submitAdvance;
+  // Set default dates for advance form
+  const today = new Date().toISOString().slice(0,10);
+  document.getElementById('aStart').value = today;
+  document.getElementById('aEnd').value = today;
 
   // Expense item clicks
   if (document.getElementById('expList')) {
@@ -834,6 +865,39 @@ function previewExpPDF() {
 
   doc.save(`IB_${exp.event.replace(/\s/g,'_')}_${exp.date}.pdf`);
   toast('PDF gerado! ✓');
+}
+
+async function submitAdvance() {
+  const evento = document.getElementById('aEvento').value;
+  const amount = parseFloat(document.getElementById('aAmount').value);
+  const currency = document.getElementById('aCurrency').value;
+  const startDate = document.getElementById('aStart').value;
+  const endDate = document.getElementById('aEnd').value;
+  const justify = document.getElementById('aJustify').value.trim();
+
+  if (!evento || isNaN(amount) || amount <= 0 || !startDate || !endDate) {
+    toast('Preencha evento, valor e datas.', true); return;
+  }
+  if (endDate < startDate) { toast('Data de término deve ser após o início.', true); return; }
+
+  const btn = document.getElementById('submitAdvBtn');
+  btn.innerHTML = '<span class="spinner"></span> Enviando...'; btn.disabled = true;
+  try {
+    const id = 'adv_' + Date.now();
+    await setOne('budgets', id, {
+      id, event: evento, userId: CU.id, userName: CU.name,
+      businessLine: CU.businessLine||'', amount, currency,
+      startDate, endDate, justify, status: 'pending',
+      createdAt: new Date().toISOString()
+    });
+    toast('Adiantamento solicitado! Aguarde aprovação. ✓');
+    // Reset form
+    document.getElementById('aEvento').value = '';
+    document.getElementById('aAmount').value = '';
+    document.getElementById('aJustify').value = '';
+    renderTrader();
+  } catch(e) { toast('Erro ao solicitar.', true); console.error(e); }
+  btn.innerHTML = 'Solicitar Adiantamento'; btn.disabled = false;
 }
 
 async function submitExp() {
@@ -1299,7 +1363,7 @@ function renderAdminHTML() {
 
     <div class="tabs">
       <button class="tab ${adminTab==='expenses'?'active':''}" data-tab="expenses">Prestações</button>
-      <button class="tab ${adminTab==='budgets'?'active':''}" data-tab="budgets">Orçamentos</button>
+      <button class="tab ${adminTab==='budgets'?'active':''}" data-tab="budgets">Adiantamentos</button>
       <button class="tab ${adminTab==='users'?'active':''}" data-tab="users">Usuários</button>
       <button class="tab ${adminTab==='categories'?'active':''}" data-tab="categories">Categorias</button>
       <button class="tab ${adminTab==='events'?'active':''}" data-tab="events">Eventos</button>
@@ -1471,10 +1535,14 @@ async function renderBudgetsTab() {
   try {
     const [budgets, users, expenses] = await Promise.all([getAll('budgets'), getAll('users'), getAll('expenses')]);
     allBudgets = budgets;
-    const traders = users.filter(u => u.role === 'trader');
     const approved = expenses.filter(e => e.status === 'approved');
     const today = new Date().toISOString().slice(0,10);
-    const rows = budgets.map(b => {
+
+    const pending = budgets.filter(b => b.status === 'pending');
+    const approvedAdv = budgets.filter(b => b.status === 'approved');
+
+    // Compute saldo for each approved advance
+    const advRows = approvedAdv.map(b => {
       const spent = approved
         .filter(e => e.userId === b.userId && e.event === b.event)
         .reduce((s,e) => {
@@ -1489,47 +1557,88 @@ async function renderBudgetsTab() {
       const user = users.find(u => u.id === b.userId);
       return {b, spent, saldo, pct, isOver, isOverdue, barColor, user};
     });
-    const overdueCount = rows.filter(r => r.isOverdue).length;
+
+    const overdueCount = advRows.filter(r => r.isOverdue).length;
+
     document.getElementById('tabContent').innerHTML = `
-      <div class="card">
-        <div class="card-title">
-          <div class="card-title-left"><div class="dot"></div> Orçamentos</div>
-          <button class="btn btn-gold" style="padding:9px 18px;font-size:11px;" id="newBudgetBtn">+ Novo Orçamento</button>
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-title"><div class="card-title-left"><div class="dot"></div> Solicitações Pendentes</div>
+          <span class="status-badge s-pending" style="font-size:11px;">${pending.length} pendente(s)</span>
         </div>
-        ${overdueCount ? `<div style="background:rgba(224,85,85,0.1);border:1px solid rgba(224,85,85,0.3);padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:10px;">
-          <span style="font-size:20px;">⚠️</span>
-          <div><div style="font-weight:600;color:var(--danger);">${overdueCount} orçamento(s) com prazo vencido e saldo pendente</div>
-          <div style="font-size:12px;color:var(--dim);margin-top:2px;">Colaboradores que não prestaram contas completas após o prazo.</div></div>
-        </div>` : ''}
-        ${!rows.length ? '<div class="empty"><div class="big">$</div><p>Nenhum orçamento cadastrado ainda.</p></div>' :
-          `<div style="display:flex;flex-direction:column;gap:10px;">
-            ${rows.map(({b,spent,saldo,pct,isOver,isOverdue,barColor,user}) => `
-              <div class="budget-card ${isOver?'over':''}">
+        ${!pending.length
+          ? '<div style="color:var(--dim);font-size:13px;padding:8px 0;">Nenhuma solicitação pendente.</div>'
+          : pending.map(b => {
+              const user = users.find(u=>u.id===b.userId);
+              return `<div class="budget-card" style="margin-bottom:10px;">
                 <div class="budget-header">
                   <div>
                     <div class="budget-event">${b.event}</div>
                     <div class="budget-user">👤 ${user?.name||b.userId} · ${b.businessLine||''}</div>
-                    <div class="budget-dates">📅 ${fmtDate(b.startDate)} → ${fmtDate(b.endDate)}
-                      ${isOverdue?'<span class="budget-overdue"> · ⚠️ PRAZO VENCIDO</span>':''}
-                    </div>
+                    <div class="budget-dates">📅 ${fmtDate(b.startDate)} → ${fmtDate(b.endDate)}</div>
+                    ${b.justify?`<div style="font-size:12px;color:var(--dim);margin-top:4px;">💬 ${b.justify}</div>`:''}
                   </div>
                   <div style="text-align:right;">
-                    <div style="font-size:10px;letter-spacing:1px;color:var(--dim);text-transform:uppercase;margin-bottom:4px;">Saldo</div>
-                    <div class="budget-saldo ${isOver?'over':pct>80?'warn':'ok'}">${SYM[b.currency]} ${fmt(Math.abs(saldo))}${isOver?' <small style="font-size:11px;">(negativo)</small>':''}</div>
+                    <div style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Valor solicitado</div>
+                    <div class="budget-saldo ok">${SYM[b.currency]} ${fmt(b.amount)}</div>
                   </div>
                 </div>
-                <div class="budget-bar-wrap"><div class="budget-bar" style="width:${pct}%;background:${barColor};"></div></div>
-                <div class="budget-amounts">
-                  <span>Gasto aprovado: <strong>${SYM[b.currency]} ${fmt(spent)}</strong></span>
-                  <span>Total: <strong>${SYM[b.currency]} ${fmt(b.amount)}</strong></span>
+                <div style="display:flex;gap:8px;margin-top:10px;">
+                  <button class="act-btn act-approve" data-adv-approve="${b.id}">✓ Aprovar</button>
+                  <button class="act-btn act-reject" data-adv-reject="${b.id}">✕ Recusar</button>
                 </div>
-                <div style="margin-top:10px;"><button class="act-btn act-delete" data-bid="${b.id}">Excluir</button></div>
-              </div>`).join('')}
-          </div>`}
+              </div>`;
+            }).join('')}
+      </div>
+
+      <div class="card">
+        <div class="card-title"><div class="card-title-left"><div class="dot"></div> Adiantamentos Aprovados Vigentes</div></div>
+        ${overdueCount ? `<div style="background:rgba(224,85,85,0.1);border:1px solid rgba(224,85,85,0.3);padding:12px 16px;margin-bottom:14px;display:flex;gap:10px;align-items:center;">
+          <span>⚠️</span><div style="font-weight:600;color:var(--danger);">${overdueCount} com prazo vencido e saldo pendente</div>
+        </div>` : ''}
+        ${!advRows.length
+          ? '<div style="color:var(--dim);font-size:13px;padding:8px 0;">Nenhum adiantamento aprovado.</div>'
+          : `<div style="display:flex;flex-direction:column;gap:10px;">
+              ${advRows.map(({b,spent,saldo,pct,isOver,isOverdue,barColor,user}) => `
+                <div class="budget-card ${isOver?'over':''}">
+                  <div class="budget-header">
+                    <div>
+                      <div class="budget-event">${b.event}</div>
+                      <div class="budget-user">👤 ${user?.name||b.userId} · ${b.businessLine||''}</div>
+                      <div class="budget-dates">📅 ${fmtDate(b.startDate)} → ${fmtDate(b.endDate)}
+                        ${isOverdue?'<span class="budget-overdue"> · ⚠️ PRAZO VENCIDO</span>':''}
+                      </div>
+                    </div>
+                    <div style="text-align:right;">
+                      <div style="font-size:10px;letter-spacing:1px;color:var(--dim);text-transform:uppercase;margin-bottom:4px;">Saldo restante</div>
+                      <div class="budget-saldo ${isOver?'over':pct>80?'warn':'ok'}">${SYM[b.currency]} ${fmt(Math.abs(saldo))}${isOver?' <small style="font-size:11px;">(negativo)</small>':''}</div>
+                    </div>
+                  </div>
+                  <div class="budget-bar-wrap"><div class="budget-bar" style="width:${pct}%;background:${barColor};"></div></div>
+                  <div class="budget-amounts">
+                    <span>Prestado (aprovado): <strong>${SYM[b.currency]} ${fmt(spent)}</strong></span>
+                    <span>Adiantado: <strong>${SYM[b.currency]} ${fmt(b.amount)}</strong></span>
+                  </div>
+                  <div style="margin-top:10px;"><button class="act-btn act-delete" data-bid="${b.id}">Excluir</button></div>
+                </div>`).join('')}
+            </div>`}
       </div>`;
-    document.getElementById('newBudgetBtn').onclick = () => openNewBudgetModal(traders);
+
+    // Bind approve/reject
+    document.querySelectorAll('[data-adv-approve]').forEach(btn => { btn.onclick = () => changeAdvStatus(btn.dataset.advApprove, 'approved'); });
+    document.querySelectorAll('[data-adv-reject]').forEach(btn => { btn.onclick = () => changeAdvStatus(btn.dataset.advReject, 'rejected'); });
     document.querySelectorAll('[data-bid]').forEach(btn => { btn.onclick = () => deleteBudget(btn.dataset.bid); });
-  } catch(e) { toast('Erro ao carregar orçamentos.', true); console.error(e); }
+  } catch(e) { toast('Erro ao carregar adiantamentos.', true); console.error(e); }
+}
+
+async function changeAdvStatus(id, status) {
+  try {
+    await updateOne('budgets', id, {status});
+    const b = allBudgets.find(x=>x.id===id);
+    await writeLog(status==='approved'?'ADIANTAMENTO APROVADO':'ADIANTAMENTO RECUSADO',
+      `Adiantamento de "${b?.userName}" · evento "${b?.event}" · ${SYM[b?.currency]} ${fmt(b?.amount)} foi ${status==='approved'?'aprovado':'recusado'}.`);
+    toast(status==='approved' ? 'Adiantamento aprovado! ✓' : 'Adiantamento recusado.');
+    renderBudgetsTab();
+  } catch(e) { toast('Erro.', true); }
 }
 
 function openNewBudgetModal(traders) {
