@@ -456,6 +456,11 @@ function loginUser(u) {
   if (u.role === 'admin') {
     viewMode = 'admin';
     const toggleBtn = document.getElementById('toggleViewBtn');
+    // Reset always first
+    toggleBtn.style.display = 'none';
+    toggleBtn.textContent = '';
+    toggleBtn.onclick = null;
+    // Only show for TI
     if (u.businessLine === 'TI') {
       toggleBtn.style.display = 'inline-flex';
       toggleBtn.textContent = '👤 Ver como Colaborador';
@@ -463,6 +468,7 @@ function loginUser(u) {
     }
     renderAdmin();
   } else {
+    document.getElementById('toggleViewBtn').style.display = 'none';
     renderTrader();
   }
 }
@@ -471,6 +477,7 @@ function logout() {
   CU = null; SS.clear(); pendingImgs = []; expLines = [{id:Date.now()}];
   document.getElementById('app').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
+  document.getElementById('toggleViewBtn').style.display = 'none';
   document.getElementById('lEmail').value = ''; document.getElementById('lPass').value = '';
   document.getElementById('lError').textContent = '';
 }
@@ -513,8 +520,8 @@ async function renderTrader() {
         <label class="field" style="margin-bottom:0">
           <label>Comprovantes / Imagens</label>
           <div class="upload-area">
-            <input type="file" id="fImgs" accept="image/*" multiple>
-            <div class="upload-text"><span>Clique ou arraste</span> para adicionar imagens<br><small>JPG, PNG, WEBP · múltiplos arquivos</small></div>
+            <input type="file" id="fImgs" accept="image/*,.pdf" multiple>
+            <div class="upload-text"><span>Clique ou arraste</span> para adicionar arquivos<br><small>JPG, PNG, WEBP, PDF · múltiplos arquivos</small></div>
           </div>
           <div class="prev-grid" id="prevGrid"></div>
         </label>
@@ -645,7 +652,15 @@ function removeLine(id) {
 function handleImgUpload(e) {
   Array.from(e.target.files).forEach(file => {
     const r = new FileReader();
-    r.onload = ev => { pendingImgs.push({name:file.name,dataUrl:ev.target.result}); renderPrevs(); };
+    r.onload = ev => {
+      pendingImgs.push({
+        name: file.name,
+        dataUrl: ev.target.result,
+        type: file.type,
+        isPDF: file.type === 'application/pdf'
+      });
+      renderPrevs();
+    };
     r.readAsDataURL(file);
   });
   e.target.value = '';
@@ -655,11 +670,23 @@ function renderPrevs() {
   if (!g) return;
   g.innerHTML = pendingImgs.map((img,i) => `
     <div class="prev-wrap">
-      <img class="prev-img" src="${img.dataUrl}" data-src="${img.dataUrl}">
+      ${img.isPDF
+        ? `<div class="prev-img" data-idx="${i}" style="display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--gray2);border:1px solid var(--border);cursor:pointer;gap:4px;">
+            <span style="font-size:22px;">📄</span>
+            <span style="font-size:9px;color:var(--dim);text-align:center;max-width:68px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${img.name}</span>
+           </div>`
+        : `<img class="prev-img" src="${img.dataUrl}" data-src="${img.dataUrl}">`
+      }
       <button class="prev-rm" data-idx="${i}">✕</button>
     </div>`).join('');
-  g.querySelectorAll('.prev-img').forEach(img => img.onclick = () => openLB(img.dataset.src));
+  g.querySelectorAll('img.prev-img').forEach(img => img.onclick = () => openLB(img.dataset.src));
+  g.querySelectorAll('div.prev-img[data-idx]').forEach(div => div.onclick = () => openPDF(pendingImgs[parseInt(div.dataset.idx)].dataUrl));
   g.querySelectorAll('.prev-rm').forEach(btn => btn.onclick = () => { pendingImgs.splice(parseInt(btn.dataset.idx),1); renderPrevs(); });
+}
+
+function openPDF(dataUrl) {
+  const win = window.open();
+  win.document.write(`<iframe src="${dataUrl}" style="width:100%;height:100vh;border:none;"></iframe>`);
 }
 
 // ═══════════════════════════
@@ -836,8 +863,14 @@ async function openDetail(id) {
     </div>`).join('');
 
   const imgsHtml = exp.images && exp.images.length
-    ? exp.images.map(img=>`<img class="dp-img" src="${img.dataUrl}" data-src="${img.dataUrl}">`).join('')
-    : '<span style="color:var(--dim);font-size:13px;">Nenhuma imagem anexada</span>';
+    ? exp.images.map(img => img.isPDF
+        ? `<div class="dp-img" onclick="openPDF('${img.dataUrl}')" style="display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--gray2);cursor:pointer;gap:6px;" title="${img.name}">
+            <span style="font-size:28px;">📄</span>
+            <span style="font-size:9px;color:var(--dim);text-align:center;max-width:86px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${img.name}</span>
+           </div>`
+        : `<img class="dp-img" src="${img.dataUrl}" data-src="${img.dataUrl}">`
+      ).join('')
+    : '<span style="color:var(--dim);font-size:13px;">Nenhum comprovante anexado</span>';
 
   // Header actions
   let headerActions = '';
@@ -1567,6 +1600,9 @@ function openReportModal() {
       <div class="field full"><label>Linha de Negócio</label>
         <select id="rBiz"><option value="">Todas</option>${BIZ.map(l=>`<option>${l}</option>`).join('')}</select>
       </div>
+      <div class="field full"><label>Evento</label>
+        <select id="rEvento"><option value="">Todos os eventos</option>${events.map(e=>`<option>${e}</option>`).join('')}</select>
+      </div>
       <div class="field full"><label>Status</label>
         <select id="rSt"><option value="">Todos</option><option value="approved">Aprovadas</option><option value="pending">Pendentes</option><option value="rejected">Recusadas</option></select>
       </div>
@@ -1592,8 +1628,9 @@ function generateReport() {
   const start = document.getElementById('rStart').value;
   const end = document.getElementById('rEnd').value;
   const biz = document.getElementById('rBiz').value;
+  const evento = document.getElementById('rEvento').value;
   const st = document.getElementById('rSt').value;
-  const filtered = allExp.filter(e => (!start||e.date>=start)&&(!end||e.date<=end)&&(!biz||e.businessLine===biz)&&(!st||e.status===st));
+  const filtered = allExp.filter(e => (!start||e.date>=start)&&(!end||e.date<=end)&&(!biz||e.businessLine===biz)&&(!evento||e.event===evento)&&(!st||e.status===st));
   if (!filtered.length) { toast('Nenhuma prestação encontrada.', true); return; }
 
   const {jsPDF} = window.jspdf;
@@ -1604,7 +1641,7 @@ function generateReport() {
   doc.setFontSize(9); doc.setFont('helvetica','normal');
   doc.setTextColor(200,168,75); doc.text('Relatório de Prestações de Contas', 14, 25);
   doc.setTextColor(150,150,150);
-  doc.text(`Período: ${start?fmtDate(start):'Início'} até ${end?fmtDate(end):'Hoje'} | ${biz||'Todas linhas'} | ${st?S_LABEL[st]:'Todos'} | Gerado: ${new Date().toLocaleString('pt-BR')}`, 14, 29);
+  doc.text(`Período: ${start?fmtDate(start):'Início'} até ${end?fmtDate(end):'Hoje'} | ${biz||'Todas linhas'} | ${evento||'Todos eventos'} | ${st?S_LABEL[st]:'Todos'} | Gerado: ${new Date().toLocaleString('pt-BR')}`, 14, 29);
 
   // Summary
   const sumRows = BIZ.filter(l=>!biz||l===biz).map(line => {
