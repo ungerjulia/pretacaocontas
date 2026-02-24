@@ -303,7 +303,11 @@ td{padding:11px 14px;font-size:13px;border-bottom:1px solid rgba(255,255,255,0.0
       Voltar
     </button>
     <div style="font-family:'Bebas Neue',sans-serif;font-size:14px;letter-spacing:3px;color:var(--dim);">INDEPENDENT BRAZIL</div>
-    <div id="dpHeaderActions" style="display:flex;gap:8px;"></div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button class="btn btn-outline" style="padding:8px 14px;font-size:11px;" id="dpXlsBtn">⬇ Excel</button>
+      <button class="btn btn-outline" style="padding:8px 14px;font-size:11px;" id="dpPdfBtn">⬇ PDF</button>
+      <div id="dpHeaderActions" style="display:flex;gap:8px;"></div>
+    </div>
   </div>
   <div class="dp-content" id="dpContent"></div>
 </div>
@@ -795,6 +799,10 @@ async function openDetail(id) {
   // Image clicks
   document.querySelectorAll('.dp-img').forEach(img => img.onclick = () => openLB(img.dataset.src));
 
+  // Export buttons
+  document.getElementById('dpXlsBtn').onclick = () => exportDetailXLS(exp);
+  document.getElementById('dpPdfBtn').onclick = () => exportDetailPDF(exp);
+
   // Action buttons (both header and bottom)
   document.querySelectorAll('[data-action]').forEach(btn => {
     btn.onclick = () => {
@@ -809,6 +817,107 @@ async function openDetail(id) {
 
 function closeDetail() {
   document.getElementById('detailPage').style.display = 'none';
+}
+
+function exportDetailXLS(exp) {
+  const lines = exp.lines || [{category:exp.category, amount:exp.amount, currency:exp.currency, description:''}];
+  const rows = lines.map((l,i) => ({
+    'Trader': exp.userName,
+    'Linha de Negócio': exp.businessLine||'',
+    'Evento': exp.event,
+    'Data': fmtDate(exp.date),
+    'Linha Despesa': `Linha ${i+1}`,
+    'Categoria': l.category,
+    'Valor': l.amount,
+    'Moeda': l.currency,
+    'Descrição': l.description||'',
+    'Status': S_LABEL[exp.status],
+    'Inclusão': fmtDT(exp.createdAt),
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Prestação');
+  XLSX.writeFile(wb, `IB_${exp.event.replace(/\s+/g,'_')}_${exp.date}.xlsx`);
+  toast('Excel exportado! ✓');
+}
+
+function exportDetailPDF(exp) {
+  const {jsPDF} = window.jspdf;
+  const doc = new jsPDF();
+  const lines = exp.lines || [{category:exp.category, amount:exp.amount, currency:exp.currency, description:''}];
+  const color = BIZ_COLOR[exp.businessLine] || '#888';
+
+  // Header
+  doc.setFillColor(10,10,10); doc.rect(0,0,210,28,'F');
+  doc.setTextColor(245,245,240); doc.setFontSize(20); doc.setFont('helvetica','bold');
+  doc.text('INDEPENDENT BRAZIL', 14, 16);
+  doc.setFontSize(9); doc.setFont('helvetica','normal');
+  doc.setTextColor(200,168,75); doc.text('Prestação de Contas', 14, 23);
+
+  // Status badge
+  const stColor = exp.status==='approved' ? [76,175,125] : exp.status==='rejected' ? [224,85,85] : [200,168,75];
+  doc.setFillColor(...stColor); doc.rect(160,8,40,12,'F');
+  doc.setTextColor(255,255,255); doc.setFontSize(9); doc.setFont('helvetica','bold');
+  doc.text(S_LABEL[exp.status].toUpperCase(), 162, 16);
+
+  // Event title
+  doc.setTextColor(10,10,10); doc.setFontSize(18); doc.setFont('helvetica','bold');
+  doc.text(exp.event, 14, 42);
+
+  // Info grid
+  doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(120,120,120);
+  doc.text('TRADER', 14, 54); doc.text('LINHA DE NEGÓCIO', 70, 54);
+  doc.text('DATA', 130, 54); doc.text('INCLUSÃO', 165, 54);
+  doc.setTextColor(10,10,10); doc.setFontSize(10); doc.setFont('helvetica','bold');
+  doc.text(exp.userName, 14, 61);
+  doc.text(exp.businessLine||'—', 70, 61);
+  doc.text(fmtDate(exp.date), 130, 61);
+  doc.text(fmtDT(exp.createdAt), 165, 61);
+
+  if (exp.description) {
+    doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(120,120,120);
+    doc.text('DESCRIÇÃO GERAL', 14, 72);
+    doc.setTextColor(10,10,10); doc.setFontSize(10); doc.setFont('helvetica','normal');
+    doc.text(exp.description, 14, 78);
+  }
+
+  // Divider
+  doc.setDrawColor(220,220,220); doc.line(14, 85, 196, 85);
+
+  // Lines table
+  doc.setFontSize(8); doc.setFont('helvetica','bold'); doc.setTextColor(120,120,120);
+  doc.text('LINHAS DE DESPESA', 14, 92);
+  doc.autoTable({
+    head:[['#','Categoria','Descrição','Moeda','Valor']],
+    body: lines.map((l,i) => [
+      `Linha ${i+1}`, l.category, l.description||'—', l.currency,
+      `${SYM[l.currency]} ${fmt(l.amount)}`
+    ]),
+    startY: 96,
+    styles:{fontSize:9, cellPadding:5},
+    headStyles:{fillColor:[10,10,10], textColor:[200,168,75], fontStyle:'bold'},
+    columnStyles:{ 4:{halign:'right', fontStyle:'bold'} },
+    alternateRowStyles:{fillColor:[248,248,245]},
+  });
+
+  // Totals per currency
+  const totals = {};
+  lines.forEach(l => { totals[l.currency] = (totals[l.currency]||0) + l.amount; });
+  let y = doc.lastAutoTable.finalY + 8;
+  doc.setFontSize(8); doc.setTextColor(120,120,120); doc.setFont('helvetica','normal');
+  doc.text('TOTAL', 140, y);
+  Object.entries(totals).forEach(([cur, val]) => {
+    y += 7;
+    doc.setFontSize(12); doc.setTextColor(10,10,10); doc.setFont('helvetica','bold');
+    doc.text(`${SYM[cur]} ${fmt(val)}`, 140, y);
+  });
+
+  // Footer
+  doc.setFontSize(8); doc.setTextColor(180,180,180); doc.setFont('helvetica','normal');
+  doc.text(`Gerado em ${new Date().toLocaleString('pt-BR')} · Independent Brazil`, 14, 285);
+
+  doc.save(`IB_${exp.event.replace(/\s+/g,'_')}_${exp.date}.pdf`);
+  toast('PDF exportado! ✓');
 }
 
 document.getElementById('dpBackBtn').onclick = closeDetail;
