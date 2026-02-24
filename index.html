@@ -341,6 +341,7 @@ const S_CLASS = {pending:'s-pending',approved:'s-approved',rejected:'s-rejected'
 
 let CU = null; // current user
 let viewMode = 'admin'; // 'admin' or 'trader' (for TI testing)
+const isTI = () => CU && CU.businessLine === 'TI';
 let allExp = [];
 let cats = ['Viagem','Aluguel de Carro','Alimentação','Brinde','Outros'];
 let events = [];
@@ -819,6 +820,98 @@ function closeDetail() {
   document.getElementById('detailPage').style.display = 'none';
 }
 
+// ═══════════════════════════════════════════
+// AUDIT LOG
+// ═══════════════════════════════════════════
+async function writeLog(action, detail) {
+  try {
+    const id = 'log_' + Date.now();
+    await setOne('logs', id, {
+      id,
+      action,
+      detail,
+      userName: CU ? CU.name : '—',
+      userId: CU ? CU.id : '—',
+      createdAt: new Date().toISOString()
+    });
+  } catch(e) { console.warn('Log error:', e); }
+}
+
+async function renderLogTab() {
+  document.getElementById('tabContent').innerHTML = `
+    <div class="card">
+      <div class="card-title"><div class="card-title-left"><div class="dot"></div> Log de Auditoria</div></div>
+      <div style="text-align:center;padding:40px;"><span class="spinner" style="width:24px;height:24px;border-width:3px;"></span></div>
+    </div>`;
+  try {
+    const logs = await getAll('logs');
+    const ACTION_COLOR = {
+      'APROVADO': 'var(--success)', 'RECUSADO': 'var(--danger)', 'EXCLUÍDO': '#e05555',
+      'USUÁRIO CRIADO': 'var(--accent)', 'USUÁRIO REMOVIDO': '#888',
+    };
+    document.getElementById('tabContent').innerHTML = `
+      <div class="card">
+        <div class="card-title"><div class="card-title-left"><div class="dot"></div> Log de Auditoria</div>
+          <span style="font-size:11px;color:var(--dim);font-family:'DM Sans',sans-serif;font-weight:400;letter-spacing:0;">${logs.length} registros</span>
+        </div>
+        <div class="filters" style="margin-bottom:16px;">
+          <input type="text" id="logFilter" placeholder="Buscar..." style="min-width:200px;">
+          <select id="logActionFilter">
+            <option value="">Todas as ações</option>
+            <option value="APROVADO">Aprovações</option>
+            <option value="RECUSADO">Recusas</option>
+            <option value="EXCLUÍDO">Exclusões</option>
+            <option value="USUÁRIO">Usuários</option>
+          </select>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Data / Hora</th><th>Ação</th><th>Detalhe</th><th>Realizado por</th></tr></thead>
+            <tbody id="logTbody"></tbody>
+          </table>
+        </div>
+      </div>`;
+
+    window._allLogs = logs;
+    renderLogTable(logs);
+
+    document.getElementById('logFilter').oninput = filterLog;
+    document.getElementById('logActionFilter').onchange = filterLog;
+  } catch(e) { toast('Erro ao carregar log.', true); }
+}
+
+function filterLog() {
+  const txt = (document.getElementById('logFilter')?.value||'').toLowerCase();
+  const act = document.getElementById('logActionFilter')?.value||'';
+  const filtered = (window._allLogs||[]).filter(l =>
+    (!txt || l.detail.toLowerCase().includes(txt) || l.userName.toLowerCase().includes(txt))
+    && (!act || l.action.includes(act))
+  );
+  renderLogTable(filtered);
+}
+
+function renderLogTable(logs) {
+  const tbody = document.getElementById('logTbody');
+  if (!tbody) return;
+  if (!logs.length) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--dim);padding:30px;">Nenhum registro encontrado.</td></tr>`;
+    return;
+  }
+  const ACTION_COLOR = {
+    'APROVADO':'var(--success)','RECUSADO':'var(--danger)','EXCLUÍDO':'#e05555',
+    'USUÁRIO CRIADO':'var(--accent)','USUÁRIO REMOVIDO':'#888'
+  };
+  tbody.innerHTML = logs.map(l => {
+    const color = Object.entries(ACTION_COLOR).find(([k]) => l.action.includes(k))?.[1] || 'var(--dim)';
+    return `<tr>
+      <td style="color:var(--dim);font-size:12px;white-space:nowrap;">${new Date(l.createdAt).toLocaleString('pt-BR')}</td>
+      <td><span style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:${color};background:rgba(255,255,255,0.05);padding:3px 8px;">${l.action}</span></td>
+      <td style="font-size:13px;">${l.detail}</td>
+      <td style="font-size:12px;color:var(--dim);">${l.userName}</td>
+    </tr>`;
+  }).join('');
+}
+
 function exportDetailXLS(exp) {
   const lines = exp.lines || [{category:exp.category, amount:exp.amount, currency:exp.currency, description:''}];
   const rows = lines.map((l,i) => ({
@@ -1003,6 +1096,7 @@ function renderAdminHTML() {
       <button class="tab ${adminTab==='users'?'active':''}" data-tab="users">Usuários</button>
       <button class="tab ${adminTab==='categories'?'active':''}" data-tab="categories">Categorias</button>
       <button class="tab ${adminTab==='events'?'active':''}" data-tab="events">Eventos</button>
+      ${isTI() ? `<button class="tab ${adminTab==='log'?'active':''}" data-tab="log" style="color:var(--accent);">🔍 Log</button>` : ''}
     </div>
     <div id="tabContent"></div>`;
 
@@ -1026,7 +1120,8 @@ function renderTab() {
   if (adminTab === 'expenses') renderExpTab();
   else if (adminTab === 'users') renderUsersTab();
   else if (adminTab === 'categories') renderCatsTab();
-  else renderEventsTab();
+  else if (adminTab === 'events') renderEventsTab();
+  else renderLogTab();
 }
 
 // ═══════════════════════════
@@ -1135,6 +1230,9 @@ async function changeStatus(id, status) {
       const exp = allExp[idx];
       if (exp) sendEmail(exp, true);
     }
+    const expItem = allExp[idx];
+    const actionLabel = status==='approved' ? 'APROVADO' : 'RECUSADO';
+    await writeLog(actionLabel, `Prestação "${expItem?.event||id}" de ${expItem?.userName||'—'} foi ${actionLabel.toLowerCase()}.`);
     toast(status==='approved' ? 'Prestação aprovada! ✓' : 'Prestação recusada.');
     buildTable();
     renderAdminHTML();
@@ -1144,8 +1242,10 @@ async function changeStatus(id, status) {
 async function deleteExp(id) {
   if (!confirm('Excluir esta prestação permanentemente?')) return;
   try {
+    const delExp = allExp.find(e=>e.id===id);
     await delOne('expenses', id);
     allExp = allExp.filter(e=>e.id!==id);
+    await writeLog('EXCLUÍDO', `Prestação "${delExp?.event||id}" de ${delExp?.userName||'—'} foi excluída.`);
     closeDetail();
     toast('Prestação excluída.');
     buildTable();
@@ -1252,13 +1352,19 @@ async function createUser() {
     if (all.find(u=>u.email===email)) { document.getElementById('nErr').textContent='E-mail já cadastrado.'; return; }
     const id = 'u'+Date.now();
     await setOne('users',id,{id,name,email,password:pass,role,businessLine:role==='admin'?'Admin':biz,createdAt:new Date().toISOString()});
+    await writeLog('USUÁRIO CRIADO', `Usuário "${name}" (${email}) criado com acesso ${role}.`);
     closeModal(); toast('Usuário cadastrado! ✓'); renderUsersTab();
   } catch(e) { toast('Erro ao cadastrar.', true); }
 }
 
 async function deleteUser(id) {
   if (!confirm('Remover este usuário?')) return;
-  try { await delOne('users',id); toast('Usuário removido.'); renderUsersTab(); }
+  try {
+    const allU = await getAll('users');
+    const u = allU.find(x=>x.id===id);
+    await delOne('users',id);
+    await writeLog('USUÁRIO REMOVIDO', `Usuário "${u?.name||id}" (${u?.email||'—'}) foi removido.`);
+    toast('Usuário removido.'); renderUsersTab(); }
   catch(e) { toast('Erro ao remover.', true); }
 }
 
