@@ -340,6 +340,7 @@ const S_LABEL = {pending:'Pendente',approved:'Aprovado',rejected:'Recusado'};
 const S_CLASS = {pending:'s-pending',approved:'s-approved',rejected:'s-rejected'};
 
 let CU = null; // current user
+let allBudgets = [];
 let viewMode = 'admin'; // 'admin' or 'trader' (for TI testing)
 const isTI = () => CU && CU.businessLine === 'TI';
 let allExp = [];
@@ -491,6 +492,56 @@ async function renderTrader() {
   const mine = all.filter(e => e.userId === CU.id);
   allExp = mine;
 
+  // Load budgets for this user
+  let myBudgets = [];
+  try {
+    const allBuds = await getAll('budgets');
+    const approved = mine.filter(e=>e.status==='approved');
+    const today = new Date().toISOString().slice(0,10);
+    myBudgets = allBuds.filter(b => b.userId === CU.id);
+    myBudgets = myBudgets.map(b => {
+      const spent = approved
+        .filter(e => e.event === b.event)
+        .reduce((s,e) => {
+          if (e.lines) return s + e.lines.filter(l=>l.currency===b.currency).reduce((a,l)=>a+l.amount,0);
+          return e.currency===b.currency ? s+e.amount : s;
+        }, 0);
+      const saldo = b.amount - spent;
+      const pct = Math.min((spent/b.amount)*100,100);
+      const isOver = saldo < 0;
+      const isOverdue = b.endDate && b.endDate < today;
+      const barColor = isOver ? 'var(--danger)' : pct > 80 ? 'var(--accent)' : 'var(--success)';
+      return {...b, spent, saldo, pct, isOver, isOverdue, barColor};
+    });
+  } catch(e) { console.warn('Budget load error:', e); }
+
+  const budgetSection = myBudgets.length ? `
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-title"><div class="card-title-left"><div class="dot"></div> Meus Orçamentos</div></div>
+      ${myBudgets.map(b => `
+        <div class="budget-card ${b.isOver?'over':''}">
+          <div class="budget-header">
+            <div>
+              <div class="budget-event">${b.event}</div>
+              <div class="budget-dates">📅 ${fmtDate(b.startDate)} até ${fmtDate(b.endDate)}
+                ${b.isOverdue && b.saldo > 0 ? '<span class="budget-overdue"> · ⚠️ Prazo vencido!</span>' : ''}
+              </div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Saldo disponível</div>
+              <div class="budget-saldo ${b.isOver?'over':b.pct>80?'warn':'ok'}">${SYM[b.currency]} ${fmt(Math.abs(b.saldo))} ${b.isOver?'<span style="font-size:12px;">(negativo)</span>':''}</div>
+            </div>
+          </div>
+          <div class="budget-bar-wrap">
+            <div class="budget-bar" style="width:${b.pct}%;background:${b.barColor};"></div>
+          </div>
+          <div class="budget-amounts">
+            <span>Gasto (aprovado): <strong>${SYM[b.currency]} ${fmt(b.spent)}</strong></span>
+            <span>Total: <strong>${SYM[b.currency]} ${fmt(b.amount)}</strong></span>
+          </div>
+        </div>`).join('')}
+    </div>` : '';
+
   const html = `
     <div class="page-title">Olá, ${CU.name.split(' ')[0]}</div>
     <div class="page-sub">Prestação de contas · ${CU.businessLine||''}</div>
@@ -500,6 +551,7 @@ async function renderTrader() {
       <div class="stat-card"><div class="stat-label">Aprovadas</div><div class="stat-value">${mine.filter(e=>e.status==='approved').length}</div><div class="stat-sub">aprovadas</div></div>
       <div class="stat-card"><div class="stat-label">Recusadas</div><div class="stat-value">${mine.filter(e=>e.status==='rejected').length}</div><div class="stat-sub">recusadas</div></div>
     </div>
+    ${budgetSection}
     <div class="card">
       <div class="card-title"><div class="card-title-left"><div class="dot"></div> Nova Prestação</div></div>
       <div class="form-grid">
@@ -813,9 +865,13 @@ async function submitExp() {
       status:'pending', createdAt:new Date().toISOString()
     };
     await setOne('expenses', id, exp);
-    await sendEmail(exp);
+    try {
+      await sendEmail(exp);
+      toast('Prestação enviada! Email enviado ao financeiro. ✓');
+    } catch(e) {
+      toast('Prestação salva! (Falha no email — tente novamente mais tarde)', true);
+    }
     pendingImgs = []; expLines = [{id:Date.now()}];
-    toast('Prestação enviada com sucesso! ✓');
     renderTrader();
   } catch(e) { toast('Erro ao enviar.', true); console.error(e); }
   btn.innerHTML = 'Enviar Prestação'; btn.disabled = false;
@@ -825,22 +881,43 @@ async function submitExp() {
 // EMAIL
 // ═══════════════════════════
 async function sendEmail(exp, isRejection = false) {
-  try {
-    const linesText = exp.lines.map((l,i)=>`Linha ${i+1}: ${l.category} | ${SYM[l.currency]} ${fmt(l.amount)} | ${l.description||'—'}`).join('\n');
-    const subject = isRejection ? `Prestação RECUSADA: ${exp.event}` : `Nova Prestação: ${exp.event}`;
-    const msg = isRejection
-      ? `Olá ${exp.userName},\n\nSua prestação foi RECUSADA pelo financeiro.\n\nEvento: ${exp.event}\nData: ${fmtDate(exp.date)}\n\n${linesText}\n\nIndependent Brazil`
-      : `Trader: ${exp.userName}\nLinha: ${exp.businessLine}\nEvento: ${exp.event}\nData: ${fmtDate(exp.date)}\nDescrição: ${exp.description||'—'}\n\n${linesText}\n\nImagens: ${exp.images?exp.images.length:0}`;
-    await emailjs.send('service_7ojw3be','template_5r3es1d',{
-      trader_name:exp.userName, business_line:exp.businessLine||'—',
-      event:exp.event, category:exp.lines.map(l=>l.category).join(', '),
-      date:fmtDate(exp.date),
-      amount:exp.lines.map(l=>`${SYM[l.currency]} ${fmt(l.amount)}`).join(' | '),
-      description:exp.description||'—', created_at:new Date(exp.createdAt).toLocaleString('pt-BR'),
-      image_count:exp.images?exp.images.length:0,
-      name:exp.userName, title:subject, message:msg
-    });
-  } catch(e) { console.warn('Email error:', e); }
+  // Ensure emailjs is initialized
+  try { emailjs.init({publicKey:'9A4MxQWrnZ3cwvxAg'}); } catch(e){}
+
+  const linesText = exp.lines.map((l,i)=>`Linha ${i+1}: ${l.category} | ${SYM[l.currency]} ${fmt(l.amount)} | ${l.description||'—'}`).join('\n');
+  const subject = isRejection ? `Prestação RECUSADA: ${exp.event}` : `Nova Prestação: ${exp.event}`;
+  const msg = isRejection
+    ? `Olá ${exp.userName},\n\nSua prestação foi RECUSADA pelo financeiro.\n\nEvento: ${exp.event}\nData: ${fmtDate(exp.date)}\n\n${linesText}\n\nIndependent Brazil`
+    : `Trader: ${exp.userName}\nLinha: ${exp.businessLine}\nEvento: ${exp.event}\nData: ${fmtDate(exp.date)}\nDescrição: ${exp.description||'—'}\n\n${linesText}\n\nImagens: ${exp.images?exp.images.length:0}`;
+
+  const params = {
+    trader_name: exp.userName,
+    business_line: exp.businessLine||'—',
+    event: exp.event,
+    category: exp.lines.map(l=>l.category).join(', '),
+    date: fmtDate(exp.date),
+    amount: exp.lines.map(l=>`${SYM[l.currency]} ${fmt(l.amount)}`).join(' | '),
+    description: exp.description||'—',
+    created_at: new Date(exp.createdAt).toLocaleString('pt-BR'),
+    image_count: exp.images ? exp.images.length : 0,
+    name: exp.userName,
+    title: subject,
+    message: msg,
+    to_email: isRejection ? (exp.userEmail||'') : 'financial@independentbrazil.com'
+  };
+
+  // Try up to 3 times
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const result = await emailjs.send('service_7ojw3be', 'template_5r3es1d', params);
+      console.log(`Email sent OK (attempt ${attempt}):`, result.status);
+      return;
+    } catch(e) {
+      console.error(`Email attempt ${attempt} failed:`, e);
+      if (attempt < 3) await new Promise(r => setTimeout(r, 1500));
+    }
+  }
+  console.error('All email attempts failed.');
 }
 
 // ═══════════════════════════
@@ -1222,6 +1299,7 @@ function renderAdminHTML() {
 
     <div class="tabs">
       <button class="tab ${adminTab==='expenses'?'active':''}" data-tab="expenses">Prestações</button>
+      <button class="tab ${adminTab==='budgets'?'active':''}" data-tab="budgets">Orçamentos</button>
       <button class="tab ${adminTab==='users'?'active':''}" data-tab="users">Usuários</button>
       <button class="tab ${adminTab==='categories'?'active':''}" data-tab="categories">Categorias</button>
       <button class="tab ${adminTab==='events'?'active':''}" data-tab="events">Eventos</button>
@@ -1247,6 +1325,7 @@ function renderAdminHTML() {
 
 function renderTab() {
   if (adminTab === 'expenses') renderExpTab();
+  else if (adminTab === 'budgets') renderBudgetsTab();
   else if (adminTab === 'users') renderUsersTab();
   else if (adminTab === 'categories') renderCatsTab();
   else if (adminTab === 'events') renderEventsTab();
@@ -1383,6 +1462,135 @@ async function deleteExp(id) {
 }
 
 // ═══════════════════════════
+
+// ═══════════════════════════════════════════
+// BUDGETS (ORÇAMENTOS)
+// ═══════════════════════════════════════════
+async function renderBudgetsTab() {
+  document.getElementById('tabContent').innerHTML = '<div style="text-align:center;padding:40px;"><span class="spinner" style="width:24px;height:24px;border-width:3px;"></span></div>';
+  try {
+    const [budgets, users, expenses] = await Promise.all([getAll('budgets'), getAll('users'), getAll('expenses')]);
+    allBudgets = budgets;
+    const traders = users.filter(u => u.role === 'trader');
+    const approved = expenses.filter(e => e.status === 'approved');
+    const today = new Date().toISOString().slice(0,10);
+    const rows = budgets.map(b => {
+      const spent = approved
+        .filter(e => e.userId === b.userId && e.event === b.event)
+        .reduce((s,e) => {
+          if (e.lines) return s + e.lines.filter(l=>l.currency===b.currency).reduce((a,l)=>a+l.amount,0);
+          return e.currency===b.currency ? s+e.amount : s;
+        }, 0);
+      const saldo = b.amount - spent;
+      const pct = Math.min((spent/b.amount)*100, 100);
+      const isOver = saldo < 0;
+      const isOverdue = b.endDate < today && saldo > 0;
+      const barColor = isOver ? 'var(--danger)' : pct > 80 ? 'var(--accent)' : 'var(--success)';
+      const user = users.find(u => u.id === b.userId);
+      return {b, spent, saldo, pct, isOver, isOverdue, barColor, user};
+    });
+    const overdueCount = rows.filter(r => r.isOverdue).length;
+    document.getElementById('tabContent').innerHTML = `
+      <div class="card">
+        <div class="card-title">
+          <div class="card-title-left"><div class="dot"></div> Orçamentos</div>
+          <button class="btn btn-gold" style="padding:9px 18px;font-size:11px;" id="newBudgetBtn">+ Novo Orçamento</button>
+        </div>
+        ${overdueCount ? `<div style="background:rgba(224,85,85,0.1);border:1px solid rgba(224,85,85,0.3);padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:10px;">
+          <span style="font-size:20px;">⚠️</span>
+          <div><div style="font-weight:600;color:var(--danger);">${overdueCount} orçamento(s) com prazo vencido e saldo pendente</div>
+          <div style="font-size:12px;color:var(--dim);margin-top:2px;">Colaboradores que não prestaram contas completas após o prazo.</div></div>
+        </div>` : ''}
+        ${!rows.length ? '<div class="empty"><div class="big">$</div><p>Nenhum orçamento cadastrado ainda.</p></div>' :
+          `<div style="display:flex;flex-direction:column;gap:10px;">
+            ${rows.map(({b,spent,saldo,pct,isOver,isOverdue,barColor,user}) => `
+              <div class="budget-card ${isOver?'over':''}">
+                <div class="budget-header">
+                  <div>
+                    <div class="budget-event">${b.event}</div>
+                    <div class="budget-user">👤 ${user?.name||b.userId} · ${b.businessLine||''}</div>
+                    <div class="budget-dates">📅 ${fmtDate(b.startDate)} → ${fmtDate(b.endDate)}
+                      ${isOverdue?'<span class="budget-overdue"> · ⚠️ PRAZO VENCIDO</span>':''}
+                    </div>
+                  </div>
+                  <div style="text-align:right;">
+                    <div style="font-size:10px;letter-spacing:1px;color:var(--dim);text-transform:uppercase;margin-bottom:4px;">Saldo</div>
+                    <div class="budget-saldo ${isOver?'over':pct>80?'warn':'ok'}">${SYM[b.currency]} ${fmt(Math.abs(saldo))}${isOver?' <small style="font-size:11px;">(negativo)</small>':''}</div>
+                  </div>
+                </div>
+                <div class="budget-bar-wrap"><div class="budget-bar" style="width:${pct}%;background:${barColor};"></div></div>
+                <div class="budget-amounts">
+                  <span>Gasto aprovado: <strong>${SYM[b.currency]} ${fmt(spent)}</strong></span>
+                  <span>Total: <strong>${SYM[b.currency]} ${fmt(b.amount)}</strong></span>
+                </div>
+                <div style="margin-top:10px;"><button class="act-btn act-delete" data-bid="${b.id}">Excluir</button></div>
+              </div>`).join('')}
+          </div>`}
+      </div>`;
+    document.getElementById('newBudgetBtn').onclick = () => openNewBudgetModal(traders);
+    document.querySelectorAll('[data-bid]').forEach(btn => { btn.onclick = () => deleteBudget(btn.dataset.bid); });
+  } catch(e) { toast('Erro ao carregar orçamentos.', true); console.error(e); }
+}
+
+function openNewBudgetModal(traders) {
+  document.getElementById('modalBox').classList.remove('modal-wide');
+  document.getElementById('mTitle').textContent = 'Novo Orçamento';
+  document.getElementById('mBody').innerHTML = `
+    <div class="field"><label>Evento *</label>
+      <select id="bEvento"><option value="">— Selecione —</option>${events.map(e=>`<option>${e}</option>`).join('')}</select>
+    </div>
+    <div class="field"><label>Colaborador *</label>
+      <select id="bUser"><option value="">— Selecione —</option>${traders.map(u=>`<option value="${u.id}">${u.name} · ${u.businessLine||''}</option>`).join('')}</select>
+    </div>
+    <div class="form-grid">
+      <div class="field"><label>Valor *</label><input type="number" id="bAmount" placeholder="0,00" step="0.01" min="0"></div>
+      <div class="field"><label>Moeda *</label>
+        <select id="bCurrency"><option value="BRL">R$ Real</option><option value="USD">$ USD</option><option value="EUR">€ Euro</option></select>
+      </div>
+      <div class="field"><label>Data Início *</label><input type="date" id="bStart" style="color-scheme:dark;"></div>
+      <div class="field"><label>Data Término *</label><input type="date" id="bEnd" style="color-scheme:dark;"></div>
+    </div>
+    <div id="bErr" class="error-msg"></div>`;
+  document.getElementById('mActions').innerHTML = '';
+  const cancelBtn = document.createElement('button'); cancelBtn.className='btn btn-outline'; cancelBtn.textContent='Cancelar'; cancelBtn.onclick=closeModal;
+  const saveBtn = document.createElement('button'); saveBtn.className='btn btn-gold'; saveBtn.textContent='Criar Orçamento'; saveBtn.onclick=createBudget;
+  document.getElementById('mActions').append(cancelBtn, saveBtn);
+  openModal();
+  const today = new Date().toISOString().slice(0,10);
+  document.getElementById('bStart').value = today;
+  document.getElementById('bEnd').value = today;
+}
+
+async function createBudget() {
+  const evento = document.getElementById('bEvento').value;
+  const userId = document.getElementById('bUser').value;
+  const amount = parseFloat(document.getElementById('bAmount').value);
+  const currency = document.getElementById('bCurrency').value;
+  const startDate = document.getElementById('bStart').value;
+  const endDate = document.getElementById('bEnd').value;
+  const err = document.getElementById('bErr');
+  if (!evento||!userId||isNaN(amount)||amount<=0||!startDate||!endDate) { err.textContent='Preencha todos os campos.'; return; }
+  if (endDate<startDate) { err.textContent='Data término deve ser após o início.'; return; }
+  try {
+    const allUsers = await getAll('users');
+    const user = allUsers.find(u=>u.id===userId);
+    const id = 'bud_'+Date.now();
+    await setOne('budgets', id, {id, event:evento, userId, userName:user?.name||'', businessLine:user?.businessLine||'', amount, currency, startDate, endDate, createdAt:new Date().toISOString()});
+    await writeLog('ORÇAMENTO CRIADO', `${SYM[currency]} ${fmt(amount)} para "${user?.name}" · evento "${evento}".`);
+    closeModal(); toast('Orçamento criado! ✓'); renderBudgetsTab();
+  } catch(e) { toast('Erro ao criar.', true); console.error(e); }
+}
+
+async function deleteBudget(id) {
+  if (!confirm('Excluir este orçamento?')) return;
+  try {
+    const b = allBudgets.find(x=>x.id===id);
+    await delOne('budgets', id);
+    await writeLog('ORÇAMENTO EXCLUÍDO', `"${b?.userName}" · evento "${b?.event}" excluído.`);
+    toast('Excluído.'); renderBudgetsTab();
+  } catch(e) { toast('Erro ao excluir.', true); }
+}
+
 // USERS TAB
 // ═══════════════════════════
 async function renderUsersTab() {
