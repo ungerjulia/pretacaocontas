@@ -457,16 +457,10 @@ function loginUser(u) {
   if (u.role === 'admin') {
     viewMode = 'admin';
     const toggleBtn = document.getElementById('toggleViewBtn');
-    // Reset always first
-    toggleBtn.style.display = 'none';
-    toggleBtn.textContent = '';
-    toggleBtn.onclick = null;
-    // Only show for TI
-    if (u.businessLine === 'TI') {
-      toggleBtn.style.display = 'inline-flex';
-      toggleBtn.textContent = '👤 Ver como Colaborador';
-      toggleBtn.onclick = toggleView;
-    }
+    // Show for ALL admins
+    toggleBtn.style.display = 'inline-flex';
+    toggleBtn.textContent = '👤 Ver como Colaborador';
+    toggleBtn.onclick = toggleView;
     renderAdmin();
   } else {
     document.getElementById('toggleViewBtn').style.display = 'none';
@@ -1309,14 +1303,11 @@ function toggleView() {
 }
 
 async function renderTraderAsAdmin() {
-  // Temporarily simulate trader role view
+  // Temporarily simulate trader role — keep businessLine as-is so admin sees own data
   const originalRole = CU.role;
-  const originalBiz = CU.businessLine;
   CU.role = 'trader';
-  CU.businessLine = CU.businessLine === 'TI' || CU.businessLine === 'Admin' ? 'Import' : CU.businessLine;
   await renderTrader();
   CU.role = originalRole;
-  CU.businessLine = originalBiz;
 }
 
 async function renderAdmin() {
