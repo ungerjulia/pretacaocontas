@@ -8,6 +8,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-app.js";
   import { getFirestore, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
+  import { getStorage, ref, uploadString, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-storage.js";
   const app = initializeApp({
     apiKey: "AIzaSyAIV9U__iJPHPjrVHupdVpadE4Pei1zAOA",
     authDomain: "independent-brazil.firebaseapp.com",
@@ -19,6 +20,9 @@
   const db = getFirestore(app);
   window._db = db;
   window._fb = { collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, orderBy };
+  const storage = getStorage(app);
+  window._storage = storage;
+  window._fbStorage = { ref, uploadString, getDownloadURL, deleteObject };
   async function boot() {
     try {
       const aRef = doc(db,'users','u0');
@@ -357,6 +361,14 @@ let filteredExp = [];
 const db = () => window._db;
 const fb = () => window._fb;
 
+async function uploadFile(path, dataUrl) {
+  const { ref, uploadString, getDownloadURL } = window._fbStorage;
+  const storage = window._storage;
+  const fileRef = ref(storage, path);
+  await uploadString(fileRef, dataUrl, 'data_url');
+  return await getDownloadURL(fileRef);
+}
+
 async function getAll(col) {
   const {collection,getDocs,query,orderBy} = fb();
   const snap = await getDocs(query(collection(db(),col),orderBy('createdAt','desc')));
@@ -593,7 +605,7 @@ async function renderTrader() {
           <label>Comprovantes / Imagens</label>
           <div class="upload-area">
             <input type="file" id="fImgs" accept="image/*,.pdf" multiple>
-            <div class="upload-text"><span>Clique ou arraste</span> para adicionar arquivos<br><small>JPG, PNG, WEBP (auto-comprimido) · PDF até 500KB</small></div>
+            <div class="upload-text"><span>Clique ou arraste</span> para adicionar arquivos<br><small>JPG, PNG, WEBP (auto-comprimido) · PDF qualquer tamanho</small></div>
           </div>
           <div class="prev-grid" id="prevGrid"></div>
         </label>
@@ -729,23 +741,18 @@ function removeLine(id) {
 function handleImgUpload(e) {
   Array.from(e.target.files).forEach(file => {
     const isPDF = file.type === 'application/pdf';
-    // PDFs: limit 500KB
-    if (isPDF && file.size > 500 * 1024) {
-      toast(`PDF "${file.name}" muito grande (max 500KB). Compacte antes de enviar.`, true);
-      return;
-    }
-    // Images: compress before storing
     const r = new FileReader();
     r.onload = ev => {
       if (isPDF) {
-        pendingImgs.push({ name: file.name, dataUrl: ev.target.result, type: file.type, isPDF: true });
+        // Store PDF as dataUrl locally for preview + upload to Storage on submit
+        pendingImgs.push({ name: file.name, dataUrl: ev.target.result, type: file.type, isPDF: true, needsUpload: true });
         renderPrevs();
       } else {
         // Compress image via canvas
         const img = new Image();
         img.onload = () => {
           const canvas = document.createElement('canvas');
-          const MAX = 800;
+          const MAX = 900;
           let w = img.width, h = img.height;
           if (w > MAX || h > MAX) {
             if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
@@ -753,13 +760,8 @@ function handleImgUpload(e) {
           }
           canvas.width = w; canvas.height = h;
           canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-          const compressed = canvas.toDataURL('image/jpeg', 0.7);
-          // Check final size ~300KB max
-          if (compressed.length > 400000) {
-            toast(`Imagem "${file.name}" ainda muito grande após compressão. Use imagem menor.`, true);
-            return;
-          }
-          pendingImgs.push({ name: file.name, dataUrl: compressed, type: 'image/jpeg', isPDF: false });
+          const compressed = canvas.toDataURL('image/jpeg', 0.75);
+          pendingImgs.push({ name: file.name, dataUrl: compressed, type: 'image/jpeg', isPDF: false, needsUpload: false });
           renderPrevs();
         };
         img.src = ev.target.result;
@@ -788,9 +790,13 @@ function renderPrevs() {
   g.querySelectorAll('.prev-rm').forEach(btn => btn.onclick = () => { pendingImgs.splice(parseInt(btn.dataset.idx),1); renderPrevs(); });
 }
 
-function openPDF(dataUrl) {
-  const win = window.open();
-  win.document.write(`<iframe src="${dataUrl}" style="width:100%;height:100vh;border:none;"></iframe>`);
+function openPDF(src) {
+  if (src.startsWith('http')) {
+    window.open(src, '_blank');
+  } else {
+    const win = window.open();
+    win.document.write(`<iframe src="${src}" style="width:100%;height:100vh;border:none;"></iframe>`);
+  }
 }
 
 // ═══════════════════════════
@@ -946,7 +952,19 @@ async function submitExp() {
       id, userId:CU.id, userName:CU.name, businessLine:CU.businessLine||'',
       event:evento, date:data, description:desc, lines,
       category:lines[0].category, amount:lines[0].amount, currency:lines[0].currency,
-      images:pendingImgs.map(i=>({name:i.name,dataUrl:i.dataUrl})),
+      images: await Promise.all(pendingImgs.map(async (img) => {
+        if (img.isPDF && img.needsUpload) {
+          try {
+            const path = `receipts/${id}/${Date.now()}_${img.name}`;
+            const url = await uploadFile(path, img.dataUrl);
+            return { name: img.name, url, isPDF: true, storagePath: path };
+          } catch(e) {
+            console.warn('PDF upload failed, storing inline:', e);
+            return { name: img.name, dataUrl: img.dataUrl, isPDF: true };
+          }
+        }
+        return { name: img.name, dataUrl: img.dataUrl, isPDF: img.isPDF||false };
+      })),
       status:'pending', createdAt:new Date().toISOString()
     };
     await setOne('expenses', id, exp);
@@ -1026,7 +1044,7 @@ async function openDetail(id) {
 
   const imgsHtml = exp.images && exp.images.length
     ? exp.images.map(img => img.isPDF
-        ? `<div class="dp-img" onclick="openPDF('${img.dataUrl}')" style="display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--gray2);cursor:pointer;gap:6px;" title="${img.name}">
+        ? `<div class="dp-img" onclick="openPDF('${img.url||img.dataUrl||''}')" style="display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--gray2);cursor:pointer;gap:6px;" title="${img.name}">
             <span style="font-size:28px;">📄</span>
             <span style="font-size:9px;color:var(--dim);text-align:center;max-width:86px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${img.name}</span>
            </div>`
