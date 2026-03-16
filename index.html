@@ -593,7 +593,7 @@ async function renderTrader() {
           <label>Comprovantes / Imagens</label>
           <div class="upload-area">
             <input type="file" id="fImgs" accept="image/*,.pdf" multiple>
-            <div class="upload-text"><span>Clique ou arraste</span> para adicionar arquivos<br><small>JPG, PNG, WEBP, PDF · múltiplos arquivos</small></div>
+            <div class="upload-text"><span>Clique ou arraste</span> para adicionar arquivos<br><small>JPG, PNG, WEBP (auto-comprimido) · PDF até 500KB</small></div>
           </div>
           <div class="prev-grid" id="prevGrid"></div>
         </label>
@@ -728,15 +728,42 @@ function removeLine(id) {
 // ═══════════════════════════
 function handleImgUpload(e) {
   Array.from(e.target.files).forEach(file => {
+    const isPDF = file.type === 'application/pdf';
+    // PDFs: limit 500KB
+    if (isPDF && file.size > 500 * 1024) {
+      toast(`PDF "${file.name}" muito grande (max 500KB). Compacte antes de enviar.`, true);
+      return;
+    }
+    // Images: compress before storing
     const r = new FileReader();
     r.onload = ev => {
-      pendingImgs.push({
-        name: file.name,
-        dataUrl: ev.target.result,
-        type: file.type,
-        isPDF: file.type === 'application/pdf'
-      });
-      renderPrevs();
+      if (isPDF) {
+        pendingImgs.push({ name: file.name, dataUrl: ev.target.result, type: file.type, isPDF: true });
+        renderPrevs();
+      } else {
+        // Compress image via canvas
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX = 800;
+          let w = img.width, h = img.height;
+          if (w > MAX || h > MAX) {
+            if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+            else { w = Math.round(w * MAX / h); h = MAX; }
+          }
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          const compressed = canvas.toDataURL('image/jpeg', 0.7);
+          // Check final size ~300KB max
+          if (compressed.length > 400000) {
+            toast(`Imagem "${file.name}" ainda muito grande após compressão. Use imagem menor.`, true);
+            return;
+          }
+          pendingImgs.push({ name: file.name, dataUrl: compressed, type: 'image/jpeg', isPDF: false });
+          renderPrevs();
+        };
+        img.src = ev.target.result;
+      }
     };
     r.readAsDataURL(file);
   });
