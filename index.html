@@ -1654,25 +1654,23 @@ async function changeStatus(id, status) {
     await updateOne('expenses', id, {status});
     const idx = allExp.findIndex(e=>e.id===id);
     if (idx>=0) allExp[idx].status = status;
-    if (status==='rejected') {
-      // Use fresh expItem that has userEmail
-      if (expItem) sendEmail(expItem, true);
-    }
+
+    // Get expense - fetch fresh to ensure userEmail is present
     let expItem = allExp[idx];
-    // Fetch fresh to ensure we have userEmail
     if (expItem && !expItem.userEmail) {
-      try {
-        const fresh = await getOne('expenses', id);
-        if (fresh) expItem = fresh;
-      } catch(e) {}
+      try { const fresh = await getOne('expenses', id); if (fresh) expItem = fresh; } catch(e) {}
     }
+
     const actionLabel = status==='approved' ? 'APROVADO' : 'RECUSADO';
-    await writeLog(actionLabel, `Prestação "${expItem?.event||id}" de ${expItem?.userName||'—'} foi ${actionLabel.toLowerCase()}.`);
+    await writeLog(actionLabel, `Prestação "${expItem?.event||id}" de ${expItem?.userName||'-'} foi ${actionLabel.toLowerCase()}.`);
+
     if (status === 'approved') sendApprovalEmail(expItem).catch(e=>console.warn('Approval email failed:', e));
-    toast(status==='approved' ? 'Prestação aprovada! ✓' : 'Prestação recusada.');
+    if (status === 'rejected') sendEmail(expItem, true).catch(e=>console.warn('Rejection email failed:', e));
+
+    toast(status==='approved' ? 'Prestação aprovada! ' : 'Prestação recusada.');
     buildTable();
     renderAdminHTML();
-  } catch(e) { toast('Erro ao atualizar.', true); }
+  } catch(e) { console.error('changeStatus error:', e); toast('Erro ao atualizar.', true); }
 }
 
 async function deleteExp(id) {
