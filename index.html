@@ -926,12 +926,14 @@ async function submitAdvance() {
   btn.innerHTML = '<span class="spinner"></span> Enviando...'; btn.disabled = true;
   try {
     const id = 'adv_' + Date.now();
-    await setOne('budgets', id, {
-      id, event: evento, userId: CU.id, userName: CU.name,
+    const advData = {
+      id, event: evento, userId: CU.id, userName: CU.name, userEmail: CU.email||'',
       businessLine: CU.businessLine||'', amount, currency,
       startDate, endDate, justify, status: 'pending',
       createdAt: new Date().toISOString()
-    });
+    };
+    await setOne('budgets', id, advData);
+    sendAdvanceRequestEmail(advData).catch(e=>console.warn('Advance request email failed:', e));
     toast('Adiantamento solicitado! Aguarde aprovação. ✓');
     // Reset form
     document.getElementById('aEvento').value = '';
@@ -999,44 +1001,128 @@ async function submitExp() {
 // ═══════════════════════════
 // EMAIL
 // ═══════════════════════════
-async function sendEmail(exp, isRejection = false) {
-  // Ensure emailjs is initialized
+// ── Core email sender ──────────────────────────────────────
+async function sendMail(toEmail, subject, message, extraParams = {}) {
   try { emailjs.init({publicKey:'9A4MxQWrnZ3cwvxAg'}); } catch(e){}
-
-  const linesText = exp.lines.map((l,i)=>`Linha ${i+1}: ${l.category} | ${SYM[l.currency]} ${fmt(l.amount)} | ${l.description||'—'}`).join('\n');
-  const subject = isRejection ? `Prestação RECUSADA: ${exp.event}` : `Nova Prestação: ${exp.event}`;
-  const msg = isRejection
-    ? `Olá ${exp.userName},\n\nSua prestação foi RECUSADA pelo financeiro.\n\nEvento: ${exp.event}\nData: ${fmtDate(exp.date)}\n\n${linesText}\n\nIndependent Brazil`
-    : `Trader: ${exp.userName}\nLinha: ${exp.businessLine}\nEvento: ${exp.event}\nData: ${fmtDate(exp.date)}\nDescrição: ${exp.description||'—'}\n\n${linesText}\n\nImagens: ${exp.images?exp.images.length:0}`;
-
-  const params = {
-    trader_name: exp.userName,
-    business_line: exp.businessLine||'—',
-    event: exp.event,
-    category: exp.lines.map(l=>l.category).join(', '),
-    date: fmtDate(exp.date),
-    amount: exp.lines.map(l=>`${SYM[l.currency]} ${fmt(l.amount)}`).join(' | '),
-    description: exp.description||'—',
-    created_at: new Date(exp.createdAt).toLocaleString('pt-BR'),
-    image_count: exp.images ? exp.images.length : 0,
-    name: exp.userName,
-    title: subject,
-    message: msg,
-    to_email: isRejection ? (exp.userEmail||'') : 'financial@independentbrazil.com'
-  };
-
-  // Try up to 3 times
+  const params = { to_email: toEmail, title: subject, message, name: CU?.name||'Sistema IB', ...extraParams };
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      const result = await emailjs.send('service_7ojw3be', 'template_5r3es1d', params);
-      console.log(`Email sent OK (attempt ${attempt}):`, result.status);
-      return;
+      const result = await emailjs.send('service_7ojw3be', 'template_2olhsbb', params);
+      console.log(`Email OK (attempt ${attempt}):`, toEmail, subject);
+      return true;
     } catch(e) {
       console.error(`Email attempt ${attempt} failed:`, e);
       if (attempt < 3) await new Promise(r => setTimeout(r, 1500));
     }
   }
-  console.error('All email attempts failed.');
+  return false;
+}
+
+// ── 1. Nova Prestação → financial ───────────────────────────
+async function sendEmail(exp, isRejection = false) {
+  const lines = exp.lines||[{category:exp.category,amount:exp.amount,currency:exp.currency}];
+  const linesText = lines.map((l,i)=>`Linha ${i+1}: ${l.category} | ${SYM[l.currency||'BRL']} ${fmt(l.amount)} | ${l.description||'—'}`).join('\n');
+  const totals = {};
+  lines.forEach(l=>{ totals[l.currency||'BRL']=(totals[l.currency||'BRL']||0)+l.amount; });
+  const totalText = Object.entries(totals).map(([c,v])=>`${SYM[c]} ${fmt(v)}`).join(' | ');
+
+  if (isRejection) {
+    // → Notifica o colaborador da recusa
+    const to = exp.userEmail || '';
+    if (!to) { console.warn('No userEmail to notify rejection'); return; }
+    const subject = `[IB] Prestação RECUSADA — ${exp.event}`;
+    const msg = `Olá ${exp.userName},
+
+Sua prestação de contas foi RECUSADA pelo financeiro.
+
+Evento: ${exp.event}
+Data: ${fmtDate(exp.date)}
+Valor: ${totalText}
+
+Acesse o sistema para mais detalhes: https://pretacaocontas.vercel.app
+
+Independent Brazil`;
+    await sendMail(to, subject, msg, {trader_name:exp.userName, event:exp.event, amount:totalText, business_line:exp.businessLine||'—', date:fmtDate(exp.date), category:'—', description:exp.description||'—', created_at:new Date(exp.createdAt).toLocaleString('pt-BR'), image_count:exp.images?.length||0});
+  } else {
+    // → Notifica financial de nova prestação
+    const subject = `[IB] Nova Prestação de Contas — ${exp.userName} · ${exp.event}`;
+    const msg = `Nova prestação de contas recebida!
+
+Trader: ${exp.userName}
+Linha: ${exp.businessLine||'—'}
+Evento: ${exp.event}
+Data: ${fmtDate(exp.date)}
+Valor Total: ${totalText}
+Descrição: ${exp.description||'—'}
+
+${linesText}
+
+Acesse o sistema para aprovar ou recusar: https://pretacaocontas.vercel.app
+
+Independent Brazil`;
+    await sendMail('financial@independentbrazil.com', subject, msg, {trader_name:exp.userName, event:exp.event, amount:totalText, business_line:exp.businessLine||'—', date:fmtDate(exp.date), category:lines.map(l=>l.category).join(', '), description:exp.description||'—', created_at:new Date(exp.createdAt).toLocaleString('pt-BR'), image_count:exp.images?.length||0});
+  }
+}
+
+// ── 2. Prestação APROVADA → colaborador ─────────────────────
+async function sendApprovalEmail(exp) {
+  const to = exp.userEmail || '';
+  if (!to) return;
+  const lines = exp.lines||[{currency:exp.currency,amount:exp.amount}];
+  const totals = {};
+  lines.forEach(l=>{ totals[l.currency||'BRL']=(totals[l.currency||'BRL']||0)+l.amount; });
+  const totalText = Object.entries(totals).map(([c,v])=>`${SYM[c]} ${fmt(v)}`).join(' | ');
+  const subject = `[IB] Prestação APROVADA — ${exp.event}`;
+  const msg = `Olá ${exp.userName},
+
+Sua prestação de contas foi APROVADA pelo financeiro! ✓
+
+Evento: ${exp.event}
+Data: ${fmtDate(exp.date)}
+Valor: ${totalText}
+
+Acesse o sistema para mais detalhes: https://pretacaocontas.vercel.app
+
+Independent Brazil`;
+  await sendMail(to, subject, msg, {trader_name:exp.userName, event:exp.event, amount:totalText, business_line:exp.businessLine||'—', date:fmtDate(exp.date), category:'—', description:'—', created_at:'—', image_count:0});
+}
+
+// ── 3. Adiantamento solicitado → financial ──────────────────
+async function sendAdvanceRequestEmail(adv) {
+  const subject = `[IB] Solicitação de Adiantamento — ${adv.userName} · ${adv.event}`;
+  const msg = `Nova solicitação de adiantamento recebida!
+
+Colaborador: ${adv.userName}
+Linha: ${adv.businessLine||'—'}
+Evento: ${adv.event}
+Valor Solicitado: ${SYM[adv.currency]} ${fmt(adv.amount)}
+Período: ${fmtDate(adv.startDate)} até ${fmtDate(adv.endDate)}
+Justificativa: ${adv.justify||'—'}
+
+Acesse o sistema para aprovar ou recusar: https://pretacaocontas.vercel.app
+
+Independent Brazil`;
+  await sendMail('financial@independentbrazil.com', subject, msg, {trader_name:adv.userName, event:adv.event, amount:`${SYM[adv.currency]} ${fmt(adv.amount)}`, business_line:adv.businessLine||'—', date:fmtDate(adv.startDate), category:'Adiantamento', description:adv.justify||'—', created_at:new Date(adv.createdAt).toLocaleString('pt-BR'), image_count:0});
+}
+
+// ── 4. Adiantamento aprovado/recusado → colaborador ─────────
+async function sendAdvanceStatusEmail(adv, approved) {
+  const to = adv.userEmail || '';
+  if (!to) return;
+  const status = approved ? 'APROVADO ✓' : 'RECUSADO ✕';
+  const subject = `[IB] Adiantamento ${status} — ${adv.event}`;
+  const msg = `Olá ${adv.userName},
+
+Seu adiantamento foi ${status} pelo financeiro.
+
+Evento: ${adv.event}
+Valor: ${SYM[adv.currency]} ${fmt(adv.amount)}
+Período: ${fmtDate(adv.startDate)} até ${fmtDate(adv.endDate)}
+
+Acesse o sistema para mais detalhes: https://pretacaocontas.vercel.app
+
+Independent Brazil`;
+  await sendMail(to, subject, msg, {trader_name:adv.userName, event:adv.event, amount:`${SYM[adv.currency]} ${fmt(adv.amount)}`, business_line:adv.businessLine||'—', date:fmtDate(adv.startDate), category:'Adiantamento', description:'—', created_at:'—', image_count:0});
 }
 
 // ═══════════════════════════
@@ -1561,6 +1647,7 @@ async function changeStatus(id, status) {
     const expItem = allExp[idx];
     const actionLabel = status==='approved' ? 'APROVADO' : 'RECUSADO';
     await writeLog(actionLabel, `Prestação "${expItem?.event||id}" de ${expItem?.userName||'—'} foi ${actionLabel.toLowerCase()}.`);
+    if (status === 'approved') sendApprovalEmail(expItem).catch(e=>console.warn('Approval email failed:', e));
     toast(status==='approved' ? 'Prestação aprovada! ✓' : 'Prestação recusada.');
     buildTable();
     renderAdminHTML();
@@ -1692,6 +1779,7 @@ async function changeAdvStatus(id, status) {
     const b = allBudgets.find(x=>x.id===id);
     await writeLog(status==='approved'?'ADIANTAMENTO APROVADO':'ADIANTAMENTO RECUSADO',
       `Adiantamento de "${b?.userName}" · evento "${b?.event}" · ${SYM[b?.currency]} ${fmt(b?.amount)} foi ${status==='approved'?'aprovado':'recusado'}.`);
+    if (b) sendAdvanceStatusEmail(b, status==='approved').catch(e=>console.warn('Advance status email failed:', e));
     toast(status==='approved' ? 'Adiantamento aprovado! ✓' : 'Adiantamento recusado.');
     renderBudgetsTab();
   } catch(e) { toast('Erro.', true); }
