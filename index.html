@@ -966,7 +966,7 @@ async function submitExp() {
   try {
     const id = 'exp_'+Date.now();
     const exp = {
-      id, userId:CU.id, userName:CU.name, businessLine:CU.businessLine||'',
+      id, userId:CU.id, userName:CU.name, userEmail:CU.email||'', businessLine:CU.businessLine||'',
       event:evento, date:data, description:desc, lines,
       category:lines[0].category, amount:lines[0].amount, currency:lines[0].currency,
       images: await Promise.all(pendingImgs.map(async (img, i) => {
@@ -1067,7 +1067,8 @@ Independent Brazil`;
 // ── 2. Prestação APROVADA → colaborador ─────────────────────
 async function sendApprovalEmail(exp) {
   const to = exp.userEmail || '';
-  if (!to) return;
+  console.log('[EMAIL] sendApprovalEmail → to:', to, '| exp.userEmail:', exp.userEmail);
+  if (!to) { console.warn('[EMAIL] No userEmail on expense:', exp.id); return; }
   const lines = exp.lines||[{currency:exp.currency,amount:exp.amount}];
   const totals = {};
   lines.forEach(l=>{ totals[l.currency||'BRL']=(totals[l.currency||'BRL']||0)+l.amount; });
@@ -1108,7 +1109,8 @@ Independent Brazil`;
 // ── 4. Adiantamento aprovado/recusado → colaborador ─────────
 async function sendAdvanceStatusEmail(adv, approved) {
   const to = adv.userEmail || '';
-  if (!to) return;
+  console.log('[EMAIL] sendAdvanceStatusEmail → to:', to, '| adv.userEmail:', adv.userEmail);
+  if (!to) { console.warn('[EMAIL] No userEmail on advance:', adv.id); return; }
   const status = approved ? 'APROVADO ✓' : 'RECUSADO ✕';
   const subject = `[IB] Adiantamento ${status} — ${adv.event}`;
   const msg = `Olá ${adv.userName},
@@ -1641,8 +1643,8 @@ async function changeStatus(id, status) {
     const idx = allExp.findIndex(e=>e.id===id);
     if (idx>=0) allExp[idx].status = status;
     if (status==='rejected') {
-      const exp = allExp[idx];
-      if (exp) sendEmail(exp, true);
+      // Use fresh expItem that has userEmail
+      if (expItem) sendEmail(expItem, true);
     }
     let expItem = allExp[idx];
     // Fetch fresh to ensure we have userEmail
