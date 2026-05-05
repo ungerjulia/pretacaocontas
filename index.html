@@ -1644,7 +1644,14 @@ async function changeStatus(id, status) {
       const exp = allExp[idx];
       if (exp) sendEmail(exp, true);
     }
-    const expItem = allExp[idx];
+    let expItem = allExp[idx];
+    // Fetch fresh to ensure we have userEmail
+    if (expItem && !expItem.userEmail) {
+      try {
+        const fresh = await getOne('expenses', id);
+        if (fresh) expItem = fresh;
+      } catch(e) {}
+    }
     const actionLabel = status==='approved' ? 'APROVADO' : 'RECUSADO';
     await writeLog(actionLabel, `Prestação "${expItem?.event||id}" de ${expItem?.userName||'—'} foi ${actionLabel.toLowerCase()}.`);
     if (status === 'approved') sendApprovalEmail(expItem).catch(e=>console.warn('Approval email failed:', e));
@@ -1776,7 +1783,14 @@ async function renderBudgetsTab() {
 async function changeAdvStatus(id, status) {
   try {
     await updateOne('budgets', id, {status});
-    const b = allBudgets.find(x=>x.id===id);
+    // Fetch fresh to ensure we have userEmail
+    let b = allBudgets.find(x=>x.id===id);
+    if (b && !b.userEmail) {
+      try {
+        const fresh = await getOne('budgets', id);
+        if (fresh) b = fresh;
+      } catch(e) {}
+    }
     await writeLog(status==='approved'?'ADIANTAMENTO APROVADO':'ADIANTAMENTO RECUSADO',
       `Adiantamento de "${b?.userName}" · evento "${b?.event}" · ${SYM[b?.currency]} ${fmt(b?.amount)} foi ${status==='approved'?'aprovado':'recusado'}.`);
     if (b) sendAdvanceStatusEmail(b, status==='approved').catch(e=>console.warn('Advance status email failed:', e));
