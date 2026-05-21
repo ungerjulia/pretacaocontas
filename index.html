@@ -1053,9 +1053,25 @@ function applyDraftToForm(exp) {
     toast('Rascunho carregado! ✓');
   }
 
-  // Update buttons
-  const saveBtn = document.getElementById('saveDraftBtn');
-  if (saveBtn) saveBtn.textContent = '💾 Atualizar Rascunho';
+  // Re-bind all form buttons
+  const addLineBtn = document.getElementById('addLineBtn');
+  const fImgs = document.getElementById('fImgs');
+  const fCamera = document.getElementById('fCamera');
+  const submitBtn = document.getElementById('submitBtn');
+  const saveDraftBtn = document.getElementById('saveDraftBtn');
+  const previewPdfBtn = document.getElementById('previewPdfBtn');
+  const submitAdvBtn = document.getElementById('submitAdvBtn');
+
+  if (addLineBtn) addLineBtn.onclick = addLine;
+  if (fImgs) fImgs.onchange = handleImgUpload;
+  if (fCamera) fCamera.onchange = handleImgUpload;
+  if (submitBtn) submitBtn.onclick = submitExp;
+  if (saveDraftBtn) { saveDraftBtn.textContent = '💾 Atualizar Rascunho'; saveDraftBtn.onclick = saveDraft; }
+  if (previewPdfBtn) previewPdfBtn.onclick = previewExpPDF;
+  if (submitAdvBtn) submitAdvBtn.onclick = submitAdvance;
+
+  // Re-render images
+  renderPrevs();
 
   // Scroll to form top
   window.scrollTo({top: 0, behavior: 'smooth'});
