@@ -503,8 +503,9 @@ function logout() {
 async function renderTrader() {
   document.getElementById('mainContent').innerHTML = '<div style="text-align:center;padding:60px;"><span class="spinner" style="width:32px;height:32px;border-width:3px;"></span></div>';
   const all = await getAll('expenses');
-  const mine = all.filter(e => e.userId === CU.id);
-  allExp = mine;
+  const allMine = all.filter(e => e.userId === CU.id);
+  const mine = allMine.filter(e => e.status !== 'draft');
+  allExp = allMine;
 
   // Load drafts
   const myDrafts = mine.filter(e => e.status === 'draft');
@@ -655,6 +656,7 @@ async function renderTrader() {
         <button class="btn btn-outline" id="previewPdfBtn">⬇ Baixar PDF</button>
       </div>
     </div>
+  ${draftsSection}
     <div class="card">
       <div class="card-title"><div class="card-title-left"><div class="dot"></div> Minhas Prestações</div><span style="font-size:11px;color:var(--dim);font-family:'DM Sans',sans-serif;font-weight:400;letter-spacing:0;">Clique para ver detalhes</span></div>
       ${mine.length===0 ? '<div class="empty"><div class="big">IB</div><p>Nenhuma prestação enviada ainda.</p></div>'
