@@ -640,7 +640,7 @@ async function renderTrader() {
       <div style="margin-top:18px;">
         <label class="field" style="margin-bottom:0">
           <label>Comprovantes / Imagens</label>
-          <div class="upload-area">
+          <div class="upload-area" id="uploadArea">
             <input type="file" id="fImgs" accept="image/*,.pdf" multiple>
             <input type="file" id="fCamera" accept="image/*" capture="environment" style="display:none;">
             <div class="upload-text"><span>Clique ou arraste</span> para adicionar arquivos<br><small>JPG, PNG, WEBP (auto-comprimido) · PDF qualquer tamanho</small></div>
@@ -1009,87 +1009,87 @@ async function loadDraft(exp) {
 
 function applyDraftToForm(exp) {
   if (!exp) return;
-  const lines = exp.lines || [];
+  // Wait for DOM to be fully ready
+  setTimeout(() => {
+    const lines = exp.lines || [];
 
-  // Fill form fields
-  const fEvento = document.getElementById('fEvento');
-  const fData = document.getElementById('fData');
-  const fDesc = document.getElementById('fDesc');
-  if (fEvento) fEvento.value = exp.event || '';
-  if (fData) fData.value = exp.date || '';
-  if (fDesc) fDesc.value = exp.description || '';
+    // Fill form fields
+    const fEvento = document.getElementById('fEvento');
+    const fData = document.getElementById('fData');
+    const fDesc = document.getElementById('fDesc');
+    if (fEvento) fEvento.value = exp.event || '';
+    if (fData) fData.value = exp.date || '';
+    if (fDesc) fDesc.value = exp.description || '';
 
-  // Rebuild lines
-  expLines = lines.length > 0
-    ? lines.map(l => ({id: l.id || ('l'+Date.now()+Math.random())}))
-    : [{id: Date.now()}];
+    // Rebuild lines
+    expLines = lines.length > 0
+      ? lines.map(l => ({id: l.id || ('l_' + Date.now() + '_' + Math.random().toString(36).slice(2))}))
+      : [{id: Date.now()}];
 
-  const linesContainer = document.getElementById('linesContainer');
-  if (linesContainer) {
-    linesContainer.innerHTML = expLines.map((l, i) => lineHTML(l, i)).join('');
-    expLines.forEach((l, i) => {
-      const line = lines[i]; if (!line) return;
-      const lc = document.getElementById('lc_'+l.id);
-      const lv = document.getElementById('lv_'+l.id);
-      const lm = document.getElementById('lm_'+l.id);
-      const ld = document.getElementById('ld_'+l.id);
-      if (lc) lc.value = line.category||'';
-      if (lv) lv.value = line.amount||'';
-      if (lm) lm.value = line.currency||'BRL';
-      if (ld) ld.value = line.description||'';
-    });
-    bindLineEvents();
-  }
-
-  // Load images
-  pendingImgs = [];
-  if (exp.images) {
-    pendingImgs = exp.images.filter(img => !img.isPDF && img.dataUrl).map(img => ({...img}));
-    const pdfCount = exp.images.filter(img => img.isPDF).length;
-    renderPrevs();
-    if (pdfCount > 0) toast('Rascunho carregado. PDFs precisam ser anexados novamente.', true);
-    else toast('Rascunho carregado! ✓');
-  } else {
-    toast('Rascunho carregado! ✓');
-  }
-
-  // Re-bind all form buttons
-  const addLineBtn = document.getElementById('addLineBtn');
-  const fImgs = document.getElementById('fImgs');
-  const fCamera = document.getElementById('fCamera');
-  const submitBtn = document.getElementById('submitBtn');
-  const saveDraftBtn = document.getElementById('saveDraftBtn');
-  const previewPdfBtn = document.getElementById('previewPdfBtn');
-  const submitAdvBtn = document.getElementById('submitAdvBtn');
-
-  if (addLineBtn) addLineBtn.onclick = addLine;
-  if (fImgs) fImgs.onchange = handleImgUpload;
-  if (fCamera) fCamera.onchange = handleImgUpload;
-  if (submitBtn) submitBtn.onclick = submitExp;
-  if (saveDraftBtn) { saveDraftBtn.textContent = '💾 Atualizar Rascunho'; saveDraftBtn.onclick = saveDraft; }
-  if (previewPdfBtn) previewPdfBtn.onclick = previewExpPDF;
-  if (submitAdvBtn) submitAdvBtn.onclick = submitAdvance;
-
-  // Re-render images
-  renderPrevs();
-
-  // Scroll to form top
-  window.scrollTo({top: 0, behavior: 'smooth'});
-  window._pendingDraftLoad = null;
-}
-
-async function deleteDraft(id) {
-  if (!confirm('Excluir este rascunho?')) return;
-  try {
-    await delOne('expenses', id);
-    if (editingDraftId === id) {
-      editingDraftId = null;
-      document.getElementById('saveDraftBtn').textContent = '💾 Salvar Rascunho';
+    const linesContainer = document.getElementById('linesContainer');
+    if (linesContainer) {
+      linesContainer.innerHTML = expLines.map((l, i) => lineHTML(l, i)).join('');
+      expLines.forEach((l, i) => {
+        const line = lines[i]; if (!line) return;
+        const lc = document.getElementById('lc_'+l.id);
+        const lv = document.getElementById('lv_'+l.id);
+        const lm = document.getElementById('lm_'+l.id);
+        const ld = document.getElementById('ld_'+l.id);
+        if (lc) lc.value = line.category||'';
+        if (lv) lv.value = line.amount||'';
+        if (lm) lm.value = line.currency||'BRL';
+        if (ld) ld.value = line.description||'';
+      });
+      bindLineEvents();
     }
-    toast('Rascunho excluído.');
-    renderTrader();
-  } catch(e) { toast('Erro ao excluir.', true); }
+
+    // Restore non-PDF images
+    pendingImgs = [];
+    if (exp.images && exp.images.length > 0) {
+      pendingImgs = exp.images
+        .filter(img => !img.isPDF && img.dataUrl && img.dataUrl !== '')
+        .map(img => ({...img}));
+      const pdfCount = exp.images.filter(img => img.isPDF).length;
+      renderPrevs();
+      if (pdfCount > 0) toast(`Rascunho carregado. ${pdfCount} PDF(s) precisam ser anexados novamente.`, true);
+      else if (pendingImgs.length > 0) toast('Rascunho carregado com imagens! ✓');
+      else toast('Rascunho carregado! ✓');
+    } else {
+      renderPrevs();
+      toast('Rascunho carregado! ✓');
+    }
+
+    // Re-bind ALL form elements
+    const addLineBtn = document.getElementById('addLineBtn');
+    const fImgs = document.getElementById('fImgs');
+    const fCamera = document.getElementById('fCamera');
+    const submitBtn = document.getElementById('submitBtn');
+    const saveDraftBtn = document.getElementById('saveDraftBtn');
+    const previewPdfBtn = document.getElementById('previewPdfBtn');
+    const submitAdvBtn = document.getElementById('submitAdvBtn');
+    const uploadArea = document.getElementById('uploadArea');
+
+    if (addLineBtn) addLineBtn.onclick = addLine;
+    if (fImgs) { fImgs.value = ''; fImgs.onchange = handleImgUpload; }
+    if (fCamera) fCamera.onchange = handleImgUpload;
+    if (submitBtn) submitBtn.onclick = submitExp;
+    if (saveDraftBtn) { saveDraftBtn.textContent = '💾 Atualizar Rascunho'; saveDraftBtn.onclick = saveDraft; }
+    if (previewPdfBtn) previewPdfBtn.onclick = previewExpPDF;
+    if (submitAdvBtn) submitAdvBtn.onclick = submitAdvance;
+    if (uploadArea) {
+      uploadArea.onclick = () => document.getElementById('fImgs').click();
+      uploadArea.ondragover = e => { e.preventDefault(); uploadArea.style.borderColor='var(--accent)'; };
+      uploadArea.ondragleave = () => { uploadArea.style.borderColor=''; };
+      uploadArea.ondrop = e => { e.preventDefault(); uploadArea.style.borderColor=''; handleImgUpload({target:{files:e.dataTransfer.files}}); };
+    }
+
+    window._pendingDraftLoad = null;
+
+    // Scroll to top
+    window.scrollTo({top: 0, behavior: 'smooth'});
+  }, 100);
 }
+
 
 async function submitAdvance() {
   const evento = document.getElementById('aEvento').value;
