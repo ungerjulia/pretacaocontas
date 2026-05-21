@@ -684,8 +684,11 @@ async function renderTrader() {
   // Set date
   document.getElementById('fData').valueAsDate = new Date();
 
-  // Render lines
-  expLines = [{id: Date.now()}];
+  // Render lines (skip reset if loading a draft)
+  if (!window._pendingDraftLoad) {
+    expLines = [{id: Date.now()}];
+    pendingImgs = [];
+  }
   renderLines();
 
   // Events
@@ -1177,7 +1180,7 @@ function applyDraftToForm(exp) {
 
     // Scroll to top
     window.scrollTo({top: 0, behavior: 'smooth'});
-  }, 100);
+  }, 300);
 }
 
 
