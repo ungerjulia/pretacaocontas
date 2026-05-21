@@ -506,6 +506,36 @@ async function renderTrader() {
   const mine = all.filter(e => e.userId === CU.id);
   allExp = mine;
 
+  // Load drafts
+  const myDrafts = mine.filter(e => e.status === 'draft');
+  const today7 = new Date(); today7.setDate(today7.getDate() - 7);
+  const draftsSection = myDrafts.length ? `
+    <div class="card" style="border-color:rgba(200,168,75,0.2);">
+      <div class="card-title"><div class="card-title-left"><div class="dot" style="background:var(--dim);"></div> Rascunhos</div>
+        <span style="font-size:11px;color:var(--dim);font-family:'DM Sans',sans-serif;font-weight:400;letter-spacing:0;">${myDrafts.length} rascunho(s) salvo(s)</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        ${myDrafts.map(d => {
+          const isOld = d.updatedAt && new Date(d.updatedAt) < today7;
+          const ago = d.updatedAt ? (() => {
+            const diff = Math.floor((Date.now() - new Date(d.updatedAt)) / 86400000);
+            return diff === 0 ? 'hoje' : diff === 1 ? 'ontem' : diff + ' dias atrás';
+          })() : '—';
+          return `<div class="draft-card ${isOld?'old':''}">
+            <div class="draft-info">
+              <div class="draft-event">${d.event}</div>
+              <div class="draft-meta">📅 ${fmtDate(d.date)} · ${d.lines?.length||0} linha(s) · atualizado ${ago}</div>
+              ${isOld ? '<div class="draft-warning">⚠️ Rascunho com mais de 7 dias — lembre-se de enviar!</div>' : ''}
+            </div>
+            <div class="draft-actions">
+              <button class="btn btn-outline" style="font-size:11px;padding:7px 14px;" onclick="loadDraft(${JSON.stringify(d).replace(/"/g,'&quot;')})">✏️ Editar</button>
+              <button class="act-btn act-delete" onclick="deleteDraft('${d.id}')">Excluir</button>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>` : '';
+
   // Load budgets for this user
   let myBudgets = [];
   try {
@@ -621,6 +651,7 @@ async function renderTrader() {
       </div>
       <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap;">
         <button class="btn btn-gold" id="submitBtn">Enviar Prestação</button>
+        <button class="btn btn-outline" id="saveDraftBtn">💾 Salvar Rascunho</button>
         <button class="btn btn-outline" id="previewPdfBtn">⬇ Baixar PDF</button>
       </div>
     </div>
@@ -642,6 +673,7 @@ async function renderTrader() {
   document.getElementById('addLineBtn').onclick = addLine;
   document.getElementById('fImgs').onchange = handleImgUpload;
   document.getElementById('submitBtn').onclick = submitExp;
+  document.getElementById('saveDraftBtn').onclick = saveDraft;
   document.getElementById('previewPdfBtn').onclick = previewExpPDF;
   document.getElementById('submitAdvBtn').onclick = submitAdvance;
   // Set default dates for advance form
@@ -918,6 +950,116 @@ function previewExpPDF() {
   toast('PDF gerado! ✓');
 }
 
+// ═══════════════════════════════════════════
+// DRAFTS (RASCUNHOS)
+// ═══════════════════════════════════════════
+let editingDraftId = null; // tracks if editing a draft
+
+async function saveDraft() {
+  const evento = document.getElementById('fEvento').value.trim();
+  const data = document.getElementById('fData').value;
+  const desc = document.getElementById('fDesc').value.trim();
+
+  if (!evento) { toast('Selecione um evento antes de salvar.', true); return; }
+
+  const lines = [];
+  for (const l of expLines) {
+    const cat = document.getElementById('lc_'+l.id)?.value;
+    const val = parseFloat(document.getElementById('lv_'+l.id)?.value);
+    const moeda = document.getElementById('lm_'+l.id)?.value || 'BRL';
+    const ld = document.getElementById('ld_'+l.id)?.value.trim()||'';
+    if (cat || (!isNaN(val) && val > 0)) lines.push({id:l.id, category:cat||'', amount:isNaN(val)?0:val, currency:moeda, description:ld});
+  }
+
+  const btn = document.getElementById('saveDraftBtn');
+  btn.innerHTML = '<span class="spinner"></span> Salvando...'; btn.disabled = true;
+
+  try {
+    const id = editingDraftId || 'draft_' + Date.now();
+    const draftData = {
+      id, userId: CU.id, userName: CU.name, userEmail: CU.email||'',
+      businessLine: CU.businessLine||'', event: evento, date: data,
+      description: desc, lines,
+      images: pendingImgs.map(img => ({ name: img.name, dataUrl: img.isPDF ? '' : (img.dataUrl||''), isPDF: img.isPDF||false })),
+      status: 'draft', createdAt: editingDraftId ? undefined : new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    if (editingDraftId) delete draftData.createdAt;
+    await setOne('expenses', id, draftData);
+    editingDraftId = id;
+    toast('Rascunho salvo! ✓');
+    renderTrader(); // refresh to show draft in list
+  } catch(e) { toast('Erro ao salvar rascunho.', true); console.error(e); }
+  btn.innerHTML = '💾 Salvar Rascunho'; btn.disabled = false;
+}
+
+function loadDraft(exp) {
+  // Set editing mode
+  editingDraftId = exp.id;
+
+  // Fill form fields
+  document.getElementById('fEvento').value = exp.event || '';
+  document.getElementById('fData').value = exp.date || '';
+  document.getElementById('fDesc').value = exp.description || '';
+
+  // Rebuild lines
+  expLines = [];
+  pendingImgs = [];
+  const lines = exp.lines || [];
+
+  if (lines.length === 0) {
+    expLines = [{id: Date.now()}];
+  } else {
+    lines.forEach(l => expLines.push({id: l.id || Date.now() + Math.random()}));
+  }
+
+  // Re-render lines
+  const linesContainer = document.getElementById('linesContainer');
+  if (linesContainer) {
+    linesContainer.innerHTML = expLines.map((l, i) => lineHTML(l, i)).join('');
+    expLines.forEach((l, i) => {
+      const line = lines[i];
+      if (!line) return;
+      if (document.getElementById('lc_'+l.id)) document.getElementById('lc_'+l.id).value = line.category||'';
+      if (document.getElementById('lv_'+l.id)) document.getElementById('lv_'+l.id).value = line.amount||'';
+      if (document.getElementById('lm_'+l.id)) document.getElementById('lm_'+l.id).value = line.currency||'BRL';
+      if (document.getElementById('ld_'+l.id)) document.getElementById('ld_'+l.id).value = line.description||'';
+    });
+    bindLineEvents();
+  }
+
+  // Load images (non-PDF only, PDFs can't be restored from Firestore)
+  if (exp.images) {
+    pendingImgs = exp.images.filter(img => !img.isPDF && img.dataUrl).map(img => ({...img}));
+    const pdfCount = exp.images.filter(img => img.isPDF).length;
+    renderPrevs();
+    if (pdfCount > 0) toast(`Rascunho carregado. ${pdfCount} PDF(s) precisam ser anexados novamente.`, true);
+    else toast('Rascunho carregado! ✓');
+  } else {
+    toast('Rascunho carregado! ✓');
+  }
+
+  // Update save button label
+  document.getElementById('saveDraftBtn').textContent = '💾 Atualizar Rascunho';
+  document.getElementById('submitBtn').textContent = 'Enviar Prestação';
+
+  // Scroll to form
+  document.querySelector('.card').scrollIntoView({behavior:'smooth'});
+}
+
+async function deleteDraft(id) {
+  if (!confirm('Excluir este rascunho?')) return;
+  try {
+    await delOne('expenses', id);
+    if (editingDraftId === id) {
+      editingDraftId = null;
+      document.getElementById('saveDraftBtn').textContent = '💾 Salvar Rascunho';
+    }
+    toast('Rascunho excluído.');
+    renderTrader();
+  } catch(e) { toast('Erro ao excluir.', true); }
+}
+
 async function submitAdvance() {
   const evento = document.getElementById('aEvento').value;
   const amount = parseFloat(document.getElementById('aAmount').value);
@@ -1002,6 +1144,8 @@ async function submitExp() {
       toast('Prestação salva! (Falha no email — tente novamente mais tarde)', true);
     }
     pendingImgs = []; expLines = [{id:Date.now()}];
+    editingDraftId = null;
+    document.getElementById('saveDraftBtn').textContent = '💾 Salvar Rascunho';
     renderTrader();
   } catch(e) { toast('Erro ao enviar.', true); console.error(e); }
   btn.innerHTML = 'Enviar Prestação'; btn.disabled = false;
