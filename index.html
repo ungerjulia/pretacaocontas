@@ -666,6 +666,8 @@ async function renderTrader() {
   document.querySelectorAll('[data-draft-idx]').forEach(btn => {
     btn.onclick = () => loadDraft(window._myDrafts[parseInt(btn.dataset.draftIdx)]);
   });
+  // Apply draft to form if coming from loadDraft()
+  if (window._pendingDraftLoad) applyDraftToForm(window._pendingDraftLoad);
 
   // Set date
   document.getElementById('fData').valueAsDate = new Date();
@@ -998,58 +1000,66 @@ async function saveDraft() {
   btn.innerHTML = '💾 Salvar Rascunho'; btn.disabled = false;
 }
 
-function loadDraft(exp) {
-  // Set editing mode
+async function loadDraft(exp) {
+  // Set global draft state BEFORE renderTrader
   editingDraftId = exp.id;
+  window._pendingDraftLoad = exp;
+  await renderTrader();
+}
 
-  // Fill form fields
-  document.getElementById('fEvento').value = exp.event || '';
-  document.getElementById('fData').value = exp.date || '';
-  document.getElementById('fDesc').value = exp.description || '';
-
-  // Rebuild lines
-  expLines = [];
-  pendingImgs = [];
+function applyDraftToForm(exp) {
+  if (!exp) return;
   const lines = exp.lines || [];
 
-  if (lines.length === 0) {
-    expLines = [{id: Date.now()}];
-  } else {
-    lines.forEach(l => expLines.push({id: l.id || Date.now() + Math.random()}));
-  }
+  // Fill form fields
+  const fEvento = document.getElementById('fEvento');
+  const fData = document.getElementById('fData');
+  const fDesc = document.getElementById('fDesc');
+  if (fEvento) fEvento.value = exp.event || '';
+  if (fData) fData.value = exp.date || '';
+  if (fDesc) fDesc.value = exp.description || '';
 
-  // Re-render lines
+  // Rebuild lines
+  expLines = lines.length > 0
+    ? lines.map(l => ({id: l.id || ('l'+Date.now()+Math.random())}))
+    : [{id: Date.now()}];
+
   const linesContainer = document.getElementById('linesContainer');
   if (linesContainer) {
     linesContainer.innerHTML = expLines.map((l, i) => lineHTML(l, i)).join('');
     expLines.forEach((l, i) => {
-      const line = lines[i];
-      if (!line) return;
-      if (document.getElementById('lc_'+l.id)) document.getElementById('lc_'+l.id).value = line.category||'';
-      if (document.getElementById('lv_'+l.id)) document.getElementById('lv_'+l.id).value = line.amount||'';
-      if (document.getElementById('lm_'+l.id)) document.getElementById('lm_'+l.id).value = line.currency||'BRL';
-      if (document.getElementById('ld_'+l.id)) document.getElementById('ld_'+l.id).value = line.description||'';
+      const line = lines[i]; if (!line) return;
+      const lc = document.getElementById('lc_'+l.id);
+      const lv = document.getElementById('lv_'+l.id);
+      const lm = document.getElementById('lm_'+l.id);
+      const ld = document.getElementById('ld_'+l.id);
+      if (lc) lc.value = line.category||'';
+      if (lv) lv.value = line.amount||'';
+      if (lm) lm.value = line.currency||'BRL';
+      if (ld) ld.value = line.description||'';
     });
     bindLineEvents();
   }
 
-  // Load images (non-PDF only, PDFs can't be restored from Firestore)
+  // Load images
+  pendingImgs = [];
   if (exp.images) {
     pendingImgs = exp.images.filter(img => !img.isPDF && img.dataUrl).map(img => ({...img}));
     const pdfCount = exp.images.filter(img => img.isPDF).length;
     renderPrevs();
-    if (pdfCount > 0) toast(`Rascunho carregado. ${pdfCount} PDF(s) precisam ser anexados novamente.`, true);
+    if (pdfCount > 0) toast('Rascunho carregado. PDFs precisam ser anexados novamente.', true);
     else toast('Rascunho carregado! ✓');
   } else {
     toast('Rascunho carregado! ✓');
   }
 
-  // Update save button label
-  document.getElementById('saveDraftBtn').textContent = '💾 Atualizar Rascunho';
-  document.getElementById('submitBtn').textContent = 'Enviar Prestação';
+  // Update buttons
+  const saveBtn = document.getElementById('saveDraftBtn');
+  if (saveBtn) saveBtn.textContent = '💾 Atualizar Rascunho';
 
-  // Scroll to form
-  document.querySelector('.card').scrollIntoView({behavior:'smooth'});
+  // Scroll to form top
+  window.scrollTo({top: 0, behavior: 'smooth'});
+  window._pendingDraftLoad = null;
 }
 
 async function deleteDraft(id) {
@@ -1689,6 +1699,8 @@ function renderAdminHTML() {
   document.querySelectorAll('[data-draft-idx]').forEach(btn => {
     btn.onclick = () => loadDraft(window._myDrafts[parseInt(btn.dataset.draftIdx)]);
   });
+  // Apply draft to form if coming from loadDraft()
+  if (window._pendingDraftLoad) applyDraftToForm(window._pendingDraftLoad);
 
   document.getElementById('reportBtn').onclick = openReportModal;
 
