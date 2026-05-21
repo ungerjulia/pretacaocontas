@@ -514,7 +514,7 @@ async function renderTrader() {
         <span style="font-size:11px;color:var(--dim);font-family:'DM Sans',sans-serif;font-weight:400;letter-spacing:0;">${myDrafts.length} rascunho(s) salvo(s)</span>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;">
-        ${myDrafts.map(d => {
+        ${myDrafts.map((d,di) => {
           const isOld = d.updatedAt && new Date(d.updatedAt) < today7;
           const ago = d.updatedAt ? (() => {
             const diff = Math.floor((Date.now() - new Date(d.updatedAt)) / 86400000);
@@ -527,7 +527,7 @@ async function renderTrader() {
               ${isOld ? '<div class="draft-warning">⚠️ Rascunho com mais de 7 dias — lembre-se de enviar!</div>' : ''}
             </div>
             <div class="draft-actions">
-              <button class="btn btn-outline" style="font-size:11px;padding:7px 14px;" onclick="loadDraft(${JSON.stringify(d).replace(/"/g,'&quot;')})">✏️ Editar</button>
+              <button class="btn btn-outline" style="font-size:11px;padding:7px 14px;" data-draft-idx="${di}">✏️ Editar</button>
               <button class="act-btn act-delete" onclick="deleteDraft('${d.id}')">Excluir</button>
             </div>
           </div>`;
@@ -661,6 +661,11 @@ async function renderTrader() {
       : `<div class="exp-list" id="expList">${mine.map(expCard).join('')}</div>`}
     </div>`;
   document.getElementById('mainContent').innerHTML = html;
+  // Store drafts globally and bind edit buttons
+  window._myDrafts = myDrafts;
+  document.querySelectorAll('[data-draft-idx]').forEach(btn => {
+    btn.onclick = () => loadDraft(window._myDrafts[parseInt(btn.dataset.draftIdx)]);
+  });
 
   // Set date
   document.getElementById('fData').valueAsDate = new Date();
@@ -1679,6 +1684,11 @@ function renderAdminHTML() {
     <div id="tabContent"></div>`;
 
   document.getElementById('mainContent').innerHTML = html;
+  // Store drafts globally and bind edit buttons
+  window._myDrafts = myDrafts;
+  document.querySelectorAll('[data-draft-idx]').forEach(btn => {
+    btn.onclick = () => loadDraft(window._myDrafts[parseInt(btn.dataset.draftIdx)]);
+  });
 
   document.getElementById('reportBtn').onclick = openReportModal;
 
