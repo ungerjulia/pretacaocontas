@@ -678,6 +678,8 @@ async function renderTrader() {
   });
   // Apply draft to form if coming from loadDraft()
   if (window._pendingDraftLoad) applyDraftToForm(window._pendingDraftLoad);
+  // Refresh draft section
+  refreshDraftCount();
 
   // Set date
   document.getElementById('fData').valueAsDate = new Date();
@@ -1021,13 +1023,71 @@ async function refreshDraftCount() {
     const all = await getAll('expenses');
     const drafts = all.filter(e => e.userId === CU.id && e.status === 'draft');
     window._myDrafts = drafts;
-    // Update draft section if visible
-    const draftTitle = document.querySelector('.card .card-title .card-title-left');
-    if (draftTitle && draftTitle.textContent.includes('Rascunhos')) {
-      const countSpan = draftTitle.closest('.card-title').querySelector('span');
-      if (countSpan) countSpan.textContent = drafts.length + ' rascunho(s) salvo(s)';
+    const today7 = new Date(); today7.setDate(today7.getDate() - 7);
+
+    // Find or create draft section container
+    let draftContainer = document.getElementById('draftSectionContainer');
+    if (!draftContainer) {
+      // Insert before Minhas Prestações card
+      const cards = document.querySelectorAll('#mainContent .card');
+      let mineCard = null;
+      cards.forEach(c => { if (c.innerHTML.includes('Minhas Prestações')) mineCard = c; });
+      if (mineCard) {
+        draftContainer = document.createElement('div');
+        draftContainer.id = 'draftSectionContainer';
+        mineCard.parentNode.insertBefore(draftContainer, mineCard);
+      }
     }
-  } catch(e) {}
+    if (!draftContainer) return;
+
+    if (!drafts.length) { draftContainer.innerHTML = ''; return; }
+
+    draftContainer.innerHTML = `
+      <div class="card" style="border-color:rgba(200,168,75,0.2);margin-bottom:16px;">
+        <div class="card-title">
+          <div class="card-title-left"><div class="dot" style="background:var(--dim);"></div> Rascunhos</div>
+          <span style="font-size:11px;color:var(--dim);font-family:'DM Sans',sans-serif;font-weight:400;letter-spacing:0;">${drafts.length} rascunho(s) salvo(s)</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          ${drafts.map((d, di) => {
+            const isOld = d.updatedAt && new Date(d.updatedAt) < today7;
+            const diff = d.updatedAt ? Math.floor((Date.now() - new Date(d.updatedAt)) / 86400000) : -1;
+            const ago = diff < 0 ? '—' : diff === 0 ? 'hoje' : diff === 1 ? 'ontem' : diff + ' dias atrás';
+            return `<div class="draft-card ${isOld?'old':''}">
+              <div class="draft-info">
+                <div class="draft-event">${d.event}</div>
+                <div class="draft-meta">📅 ${fmtDate(d.date)} · ${d.lines?.length||0} linha(s) · atualizado ${ago}</div>
+                ${isOld ? '<div class="draft-warning">⚠️ Mais de 7 dias — lembre-se de enviar!</div>' : ''}
+              </div>
+              <div class="draft-actions">
+                <button class="btn btn-outline" style="font-size:11px;padding:7px 14px;" data-draft-idx="${di}">✏️ Editar</button>
+                <button class="act-btn act-delete" data-draft-del="${d.id}">Excluir</button>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+
+    // Bind buttons
+    draftContainer.querySelectorAll('[data-draft-idx]').forEach(btn => {
+      btn.onclick = () => loadDraft(window._myDrafts[parseInt(btn.dataset.draftIdx)]);
+    });
+    draftContainer.querySelectorAll('[data-draft-del]').forEach(btn => {
+      btn.onclick = async () => {
+        if (!confirm('Excluir este rascunho?')) return;
+        try {
+          await delOne('expenses', btn.dataset.draftDel);
+          if (editingDraftId === btn.dataset.draftDel) {
+            editingDraftId = null;
+            const sb = document.getElementById('saveDraftBtn');
+            if (sb) sb.textContent = '💾 Salvar Rascunho';
+          }
+          toast('Rascunho excluído.');
+          refreshDraftCount();
+        } catch(e) { toast('Erro ao excluir.', true); }
+      };
+    });
+  } catch(e) { console.error('refreshDraftCount error:', e); }
 }
 
 async function loadDraft(exp) {
@@ -1757,6 +1817,8 @@ function renderAdminHTML() {
   });
   // Apply draft to form if coming from loadDraft()
   if (window._pendingDraftLoad) applyDraftToForm(window._pendingDraftLoad);
+  // Refresh draft section
+  refreshDraftCount();
 
   document.getElementById('reportBtn').onclick = openReportModal;
 
