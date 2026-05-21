@@ -993,23 +993,26 @@ async function saveDraft() {
 
   try {
     const id = editingDraftId || 'draft_' + Date.now();
+
     const draftData = {
       id, userId: CU.id, userName: CU.name, userEmail: CU.email||'',
       businessLine: CU.businessLine||'', event: evento, date: data,
       description: desc, lines,
-      images: pendingImgs.map(img => ({ name: img.name, dataUrl: img.isPDF ? '' : (img.dataUrl||''), isPDF: img.isPDF||false })),
-      status: 'draft', createdAt: editingDraftId ? undefined : new Date().toISOString(),
+      images: pendingImgs.map(img => ({ name: img.name, dataUrl: img.dataUrl||'', isPDF: img.isPDF||false })),
+      status: 'draft',
       updatedAt: new Date().toISOString()
     };
-    if (editingDraftId) delete draftData.createdAt;
+    if (!editingDraftId) draftData.createdAt = new Date().toISOString();
+
     await setOne('expenses', id, draftData);
     editingDraftId = id;
-    // Update button to show it's now editing
     btn.textContent = '💾 Atualizar Rascunho';
     toast('Rascunho salvo! ✓');
-    // Just refresh draft count without full re-render
     refreshDraftCount();
-  } catch(e) { toast('Erro ao salvar rascunho.', true); console.error(e); }
+  } catch(e) {
+    console.error('[DRAFT] Save error:', e);
+    toast('Erro ao salvar rascunho: ' + (e.message||e), true);
+  }
   btn.disabled = false;
 }
 
