@@ -528,7 +528,7 @@ async function renderTrader() {
             </div>
             <div class="draft-actions">
               <button class="btn btn-outline" style="font-size:11px;padding:7px 14px;" data-draft-idx="${di}">✏️ Editar</button>
-              <button class="act-btn act-delete" onclick="deleteDraft('${d.id}')">Excluir</button>
+              <button class="act-btn act-delete" data-draft-del="${d.id}">Excluir</button>
             </div>
           </div>`;
         }).join('')}
@@ -665,6 +665,16 @@ async function renderTrader() {
   window._myDrafts = myDrafts;
   document.querySelectorAll('[data-draft-idx]').forEach(btn => {
     btn.onclick = () => loadDraft(window._myDrafts[parseInt(btn.dataset.draftIdx)]);
+  });
+  document.querySelectorAll('[data-draft-del]').forEach(btn => {
+    btn.onclick = async () => {
+      if (!confirm('Excluir este rascunho?')) return;
+      try {
+        await delOne('expenses', btn.dataset.draftDel);
+        toast('Rascunho excluído.');
+        renderTrader();
+      } catch(e) { toast('Erro ao excluir.', true); }
+    };
   });
   // Apply draft to form if coming from loadDraft()
   if (window._pendingDraftLoad) applyDraftToForm(window._pendingDraftLoad);
@@ -994,10 +1004,27 @@ async function saveDraft() {
     if (editingDraftId) delete draftData.createdAt;
     await setOne('expenses', id, draftData);
     editingDraftId = id;
+    // Update button to show it's now editing
+    btn.textContent = '💾 Atualizar Rascunho';
     toast('Rascunho salvo! ✓');
-    renderTrader(); // refresh to show draft in list
+    // Just refresh draft count without full re-render
+    refreshDraftCount();
   } catch(e) { toast('Erro ao salvar rascunho.', true); console.error(e); }
-  btn.innerHTML = '💾 Salvar Rascunho'; btn.disabled = false;
+  btn.disabled = false;
+}
+
+async function refreshDraftCount() {
+  try {
+    const all = await getAll('expenses');
+    const drafts = all.filter(e => e.userId === CU.id && e.status === 'draft');
+    window._myDrafts = drafts;
+    // Update draft section if visible
+    const draftTitle = document.querySelector('.card .card-title .card-title-left');
+    if (draftTitle && draftTitle.textContent.includes('Rascunhos')) {
+      const countSpan = draftTitle.closest('.card-title').querySelector('span');
+      if (countSpan) countSpan.textContent = drafts.length + ' rascunho(s) salvo(s)';
+    }
+  } catch(e) {}
 }
 
 async function loadDraft(exp) {
@@ -1714,6 +1741,16 @@ function renderAdminHTML() {
   window._myDrafts = myDrafts;
   document.querySelectorAll('[data-draft-idx]').forEach(btn => {
     btn.onclick = () => loadDraft(window._myDrafts[parseInt(btn.dataset.draftIdx)]);
+  });
+  document.querySelectorAll('[data-draft-del]').forEach(btn => {
+    btn.onclick = async () => {
+      if (!confirm('Excluir este rascunho?')) return;
+      try {
+        await delOne('expenses', btn.dataset.draftDel);
+        toast('Rascunho excluído.');
+        renderTrader();
+      } catch(e) { toast('Erro ao excluir.', true); }
+    };
   });
   // Apply draft to form if coming from loadDraft()
   if (window._pendingDraftLoad) applyDraftToForm(window._pendingDraftLoad);
