@@ -505,10 +505,8 @@ async function renderTrader() {
   const all = await getAll('expenses');
   const allMine = all.filter(e => e.userId === CU.id);
   const mine = allMine.filter(e => e.status !== 'draft');
+  const myDrafts = allMine.filter(e => e.status === 'draft');
   allExp = allMine;
-
-  // Load drafts
-  const myDrafts = mine.filter(e => e.status === 'draft');
   const today7 = new Date(); today7.setDate(today7.getDate() - 7);
   const draftsSection = myDrafts.length ? `
     <div class="card" style="border-color:rgba(200,168,75,0.2);">
