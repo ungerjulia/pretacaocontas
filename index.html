@@ -2058,8 +2058,7 @@ function buildTable() {
   const biz = document.getElementById('fBiz')?.value||'';
   const cat = document.getElementById('fCat')?.value||'';
   const st = document.getElementById('fSt')?.value||'';
-  // Exclude drafts from admin table
-  allExp = allExp.filter(e => e.status !== 'draft');
+  // Exclude drafts from admin table (don't modify allExp globally)
 
   filteredExp = allExp.filter(e => {
     const catStr = e.lines ? e.lines.map(l=>l.category).join(' ') : (e.category||'');
@@ -2579,7 +2578,7 @@ function generateReport() {
   const biz = document.getElementById('rBiz').value;
   const evento = document.getElementById('rEvento').value;
   const st = document.getElementById('rSt').value;
-  const filtered = allExp.filter(e => (!start||e.date>=start)&&(!end||e.date<=end)&&(!biz||e.businessLine===biz)&&(!evento||e.event===evento)&&(!st||e.status===st));
+  const filtered = allExp.filter(e => e.status !== 'draft').filter(e => (!start||e.date>=start)&&(!end||e.date<=end)&&(!biz||e.businessLine===biz)&&(!evento||e.event===evento)&&(!st||e.status===st));
   if (!filtered.length) { toast('Nenhuma prestação encontrada.', true); return; }
 
   const {jsPDF} = window.jspdf;
