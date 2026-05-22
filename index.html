@@ -1126,14 +1126,20 @@ async function refreshDraftCount() {
   } catch(e) { console.error('refreshDraftCount:', e); }
 }
 
-function toggleDraftAddLine(draft) {
+async function toggleDraftAddLine(draft) {
   const container = document.getElementById('draft_addline_' + draft.id);
   if (!container) return;
   if (container.style.display !== 'none') { container.style.display = 'none'; return; }
   const lineId = 'dl_' + Date.now();
   // Load fresh categories in case not loaded yet
-  const cats = (typeof categories !== 'undefined' && categories.length > 0) ? categories : (window.categories || []);
-  console.log('[DRAFT] categories available:', cats.length);
+  // Load categories - try from memory first, then from Firebase
+  let cats = (typeof categories !== 'undefined' && Array.isArray(categories) && categories.length > 0) ? categories : [];
+  if (!cats.length) {
+    try {
+      const cfg = await getOne('config', 'categories');
+      cats = cfg?.list || [];
+    } catch(e) {}
+  }
   container.style.display = 'block';
   container.innerHTML = `
     <div style="background:var(--gray2);border:1px solid var(--border);padding:18px;margin-top:4px;">
