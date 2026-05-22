@@ -1967,25 +1967,6 @@ function renderAdminHTML() {
     <div id="tabContent"></div>`;
 
   document.getElementById('mainContent').innerHTML = html;
-  // Store drafts globally and bind edit buttons
-  window._myDrafts = myDrafts;
-  document.querySelectorAll('[data-draft-idx]').forEach(btn => {
-    btn.onclick = () => loadDraft(window._myDrafts[parseInt(btn.dataset.draftIdx)]);
-  });
-  document.querySelectorAll('[data-draft-del]').forEach(btn => {
-    btn.onclick = async () => {
-      if (!confirm('Excluir este rascunho?')) return;
-      try {
-        await delOne('expenses', btn.dataset.draftDel);
-        toast('Rascunho excluído.');
-        renderTrader();
-      } catch(e) { toast('Erro ao excluir.', true); }
-    };
-  });
-  // Apply draft to form if coming from loadDraft()
-  if (window._pendingDraftLoad) applyDraftToForm(window._pendingDraftLoad);
-  // Refresh draft section
-  refreshDraftCount();
 
   document.getElementById('reportBtn').onclick = openReportModal;
 
