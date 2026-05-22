@@ -2023,7 +2023,7 @@ function renderExpTab() {
       <div class="filters">
         <input type="text" id="fTxt" placeholder="Buscar trader, evento..." style="min-width:180px;">
         <select id="fBiz"><option value="">Todas as linhas</option>${BIZ.map(l=>`<option>${l}</option>`).join('')}</select>
-        <select id="fCat"><option value="">Todas categorias</option>${cats.map(c=>`<option>${c}</option>`).join('')}</select>
+        <select id="fCat"><option value="">Todas categorias</option>${(typeof categories !== 'undefined' ? categories : []).map(c=>`<option>${c}</option>`).join('')}</select>
         <select id="fSt"><option value="">Todos status</option><option value="pending">Pendente</option><option value="approved">Aprovado</option><option value="rejected">Recusado</option></select>
         <div style="display:flex;gap:8px;margin-left:auto;">
           <button class="btn btn-outline" style="padding:9px 16px;font-size:11px;" id="xlsBtn">⬇ Excel</button>
@@ -2058,6 +2058,8 @@ function buildTable() {
   const biz = document.getElementById('fBiz')?.value||'';
   const cat = document.getElementById('fCat')?.value||'';
   const st = document.getElementById('fSt')?.value||'';
+  // Exclude drafts from admin table
+  allExp = allExp.filter(e => e.status !== 'draft');
 
   filteredExp = allExp.filter(e => {
     const catStr = e.lines ? e.lines.map(l=>l.category).join(' ') : (e.category||'');
