@@ -1109,23 +1109,44 @@ function toggleDraftAddLine(draft) {
   if (!container) return;
   if (container.style.display !== 'none') { container.style.display = 'none'; return; }
   const lineId = 'dl_' + Date.now();
+  // Load fresh categories in case not loaded yet
+  const cats = (window.categories || categories || []);
   container.style.display = 'block';
   container.innerHTML = `
-    <div style="font-size:11px;letter-spacing:1px;color:var(--dim);margin-bottom:8px;text-transform:uppercase;">Nova Linha</div>
-    <div class="form-grid">
-      <div class="field"><label>Categoria *</label>
-        <select id="dlc_${lineId}"><option value="">— Selecione —</option>${categories.map(c=>`<option>${c}</option>`).join('')}</select>
+    <div style="background:var(--gray2);border:1px solid var(--border);padding:18px;margin-top:4px;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:14px;letter-spacing:2px;margin-bottom:14px;color:var(--accent);">NOVA LINHA DE DESPESA</div>
+      <div class="form-grid">
+        <div class="field">
+          <label>CATEGORIA *</label>
+          <select id="dlc_${lineId}">
+            <option value="">— Selecione —</option>
+            ${cats.map(c => `<option value="${c}">${c}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>VALOR *</label>
+          <input type="number" id="dlv_${lineId}" placeholder="0,00" step="0.01" min="0">
+        </div>
+        <div class="field">
+          <label>MOEDA</label>
+          <select id="dlm_${lineId}">
+            <option value="BRL">R$ Real</option>
+            <option value="USD">$ USD</option>
+            <option value="EUR">€ Euro</option>
+          </select>
+        </div>
+        <div class="field full">
+          <label>DESCRIÇÃO</label>
+          <input type="text" id="dld_${lineId}" placeholder="Descrição desta despesa...">
+        </div>
       </div>
-      <div class="field"><label>Valor *</label><input type="number" id="dlv_${lineId}" placeholder="0,00" step="0.01" min="0"></div>
-      <div class="field"><label>Moeda</label>
-        <select id="dlm_${lineId}"><option value="BRL">R$ Real</option><option value="USD">$ USD</option><option value="EUR">€ Euro</option></select>
+      <div style="margin-top:14px;display:flex;gap:8px;">
+        <button class="btn btn-gold" style="font-size:12px;padding:10px 20px;" onclick="saveDraftLine('${draft.id}','${lineId}')">✓ Salvar Linha</button>
+        <button class="btn btn-outline" style="font-size:12px;padding:10px 20px;" onclick="document.getElementById('draft_addline_${draft.id}').style.display='none'">Cancelar</button>
       </div>
-      <div class="field full"><label>Descrição</label><input type="text" id="dld_${lineId}" placeholder="Descrição desta despesa..."></div>
-    </div>
-    <div style="margin-top:10px;display:flex;gap:8px;">
-      <button class="btn btn-gold" style="font-size:11px;padding:8px 16px;" onclick="saveDraftLine('${draft.id}','${lineId}')">Salvar Linha</button>
-      <button class="btn btn-outline" style="font-size:11px;padding:8px 16px;" onclick="document.getElementById('draft_addline_${draft.id}').style.display='none'">Cancelar</button>
     </div>`;
+  // Focus first field
+  setTimeout(() => { const el = document.getElementById('dlc_'+lineId); if(el) el.focus(); }, 50);
 }
 
 async function saveDraftLine(draftId, lineId) {
