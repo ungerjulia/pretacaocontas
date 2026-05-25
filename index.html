@@ -1409,18 +1409,20 @@ async function submitExp() {
       event:evento, date:data, description:desc, lines,
       category:lines[0].category, amount:lines[0].amount, currency:lines[0].currency,
       images: await Promise.all(pendingImgs.map(async (img, i) => {
-        if (img.isPDF && img.needsUpload) {
-          try {
-            const path = `receipts/${id}/${Date.now()}_${img.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
-            const url = await uploadFile(path, img.dataUrl);
-            return { name: img.name, url, isPDF: true, storagePath: path };
-          } catch(e) {
-            console.error('PDF upload to Storage failed:', e);
-            toast('Erro ao enviar PDF para o Storage. Verifique as regras do Firebase.', true);
-            throw e;
+        try {
+          // Upload ALL files to Storage (images + PDFs) to avoid Firestore size limits
+          const ext = img.isPDF ? 'pdf' : 'jpg';
+          const path = `receipts/${id}/${Date.now()}_${i}_${img.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+          const url = await uploadFile(path, img.dataUrl);
+          return { name: img.name, url, isPDF: img.isPDF||false, storagePath: path };
+        } catch(e) {
+          console.error('File upload failed:', e);
+          // Fallback: store inline if Storage fails (small images only)
+          if (!img.isPDF && img.dataUrl && img.dataUrl.length < 100000) {
+            return { name: img.name, dataUrl: img.dataUrl, isPDF: false };
           }
+          throw e;
         }
-        return { name: img.name, dataUrl: img.dataUrl, isPDF: img.isPDF||false };
       })),
       status:'pending', createdAt:new Date().toISOString()
     };
@@ -1606,7 +1608,7 @@ async function openDetail(id) {
             <span style="font-size:9px;color:var(--dim);text-align:center;max-width:86px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${img.name}</span>
             <span style="font-size:9px;color:var(--dim);">clique para abrir</span>
            </div>`
-        : `<img class="dp-img" src="${img.dataUrl}" data-src="${img.dataUrl}">`
+        : `<img class="dp-img" src="${img.url||img.dataUrl||''}" data-src="${img.url||img.dataUrl||''}">`
       ).join('')
     : '<span style="color:var(--dim);font-size:13px;">Nenhum comprovante anexado</span>';
 
