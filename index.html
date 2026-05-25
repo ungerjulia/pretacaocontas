@@ -2702,6 +2702,18 @@ function fmtDate(d) { return d ? new Date(d+'T12:00:00').toLocaleDateString('pt-
 function fmtDT(d) { return d ? new Date(d).toLocaleDateString('pt-BR') : '—'; }
 </script>
 <script>
+// ── Warn before leaving with unsaved data ───
+window.addEventListener('beforeunload', (e) => {
+  const hasImages = pendingImgs && pendingImgs.length > 0;
+  const hasEvent = document.getElementById('fEvento')?.value;
+  const hasLines = expLines && expLines.length > 0 && document.getElementById('lv_'+expLines[0]?.id)?.value > 0;
+  if (hasImages || (hasEvent && hasLines)) {
+    e.preventDefault();
+    e.returnValue = 'Você tem dados não enviados. Deseja realmente sair?';
+    return e.returnValue;
+  }
+});
+
 // ── PWA Install Banner ──────────────────────
 let deferredPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => {
